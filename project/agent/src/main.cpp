@@ -1,6 +1,6 @@
 #include <iostream>
 
-#include "app/agent_app.hpp"
+#include "agent_app.hpp"
 #include "piguard/version.hpp"
 
 int main() {
