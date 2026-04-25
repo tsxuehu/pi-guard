@@ -3,8 +3,8 @@
 #include <future>
 #include <thread>
 
-#include "thread_safe_queue.hpp"
-#include "types.hpp"
+#include "foundation/thread_safe_queue.hpp"
+#include "foundation/types.hpp"
 
 using piguard::foundation::Event;
 using piguard::foundation::EventType;

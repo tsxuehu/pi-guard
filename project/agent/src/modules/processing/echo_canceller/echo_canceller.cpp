@@ -1,4 +1,4 @@
-#include "echo_canceller.hpp"
+#include "processing_echo_canceller/echo_canceller.hpp"
 
 namespace piguard::processing {
 

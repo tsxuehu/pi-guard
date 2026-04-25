@@ -1,4 +1,4 @@
-#include "motion_detect.hpp"
+#include "processing_motion_detect/motion_detect.hpp"
 
 namespace piguard::processing {
 
