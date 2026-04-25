@@ -18,26 +18,23 @@ pnpm-debug.log*
 .env.*
 !.env.example
 
-# Node.js
-**/node_modules/
-**/dist/
-**/.turbo/
-**/.cache/
+# Node.js（相对仓库根）
+project/web/node_modules/
+project/web/dist/
+project/web/.turbo/
+project/web/.cache/
+project/server/node_modules/
+project/server/dist/
 
 # TypeScript
-**/*.tsbuildinfo
+*.tsbuildinfo
 
-# C/C++ / CMake
-**/build/
-**/cmake-build-*/
-**/CMakeFiles/
-**/CMakeCache.txt
-**/cmake_install.cmake
-**/compile_commands.json
-**/Makefile
+# C/C++ / CMake（相对仓库根）
+project/agent/build/
+project/agent/build-agent/
+project/agent/cmake-build-*/
+project/agent/compile_commands.json
 
-# Coverage / test output
-coverage/
-**/coverage/
+# Coverage / test（相对仓库根）
+/coverage/
 *.lcov
-
