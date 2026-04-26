@@ -7,7 +7,7 @@
 #include "foundation/thread_safe_queue.hpp"
 #include "foundation/types.hpp"
 
-namespace piguard::capture {
+namespace piguard::capture_video {
 
 class VideoCapture : public foundation::Module {
 public:
@@ -23,4 +23,4 @@ private:
     std::atomic<bool> running_{false};
 };
 
-}  // namespace piguard::capture
+}  // namespace piguard::capture_video

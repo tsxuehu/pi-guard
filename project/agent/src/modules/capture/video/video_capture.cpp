@@ -1,8 +1,15 @@
 #include "capture_video/video_capture.hpp"
 
-#include <chrono>
+#include "infra_log/logger_factory.hpp"
 
-namespace piguard::capture {
+#include <chrono>
+#include <memory>
+
+namespace piguard::capture_video {
+
+namespace {
+const std::shared_ptr<infra_log::Logger> logger = infra_log::LogFactory::getLogger("VideoCapture");
+}
 
 VideoCapture::VideoCapture(foundation::ThreadSafeQueue<foundation::VideoFrame>& out_queue) : out_queue_(out_queue) {}
 
@@ -28,4 +35,4 @@ void VideoCapture::poll_once() {
     out_queue_.push(std::move(frame));
 }
 
-}  // namespace piguard::capture
+}  // namespace piguard::capture_video

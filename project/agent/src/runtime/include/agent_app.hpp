@@ -52,7 +52,7 @@ private:
     infra::PerfMonitor perf_monitor_;
     infra::EventBus event_bus_;
 
-    capture::VideoCapture video_capture_;
+    capture_video::VideoCapture video_capture_;
     capture::AudioCapture audio_capture_;
 
     processing::MotionDetect motion_detect_;
