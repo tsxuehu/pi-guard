@@ -18,7 +18,8 @@ bool AgentApp::start() {
         return true;
     }
 
-    logger_.start();
+    log_module_.start();
+    logger_ = infra_log::LogFactory::getLogger("AgentApp");
     config_manager_.start();
     perf_monitor_.start();
     video_capture_.start();
@@ -33,7 +34,7 @@ bool AgentApp::start() {
     ws_client_.start();
 
     event_bus_.subscribe(foundation::EventType::MotionStart, [this](const foundation::Event& event) {
-        logger_.log(infra::Logger::Level::Info, "motion detected: " + event.payload);
+        logger_->info("motion detected: " + event.payload);
     });
 
     start_threads();
@@ -58,7 +59,7 @@ void AgentApp::stop() {
     video_capture_.stop();
     perf_monitor_.stop();
     config_manager_.stop();
-    logger_.stop();
+    log_module_.stop();
 }
 
 void AgentApp::run_for_demo() {
@@ -66,10 +67,11 @@ void AgentApp::run_for_demo() {
     for (int i = 0; i < 10 && running_.load(); ++i) {
         std::this_thread::sleep_for(100ms);
         auto stats = perf_monitor_.collect();
-        logger_.log(infra::Logger::Level::Debug,
-                    "perf cpu=" + std::to_string(stats.cpu_usage_percent) +
-                        ", mem=" + std::to_string(stats.memory_usage_percent) +
-                        ", temp=" + std::to_string(stats.temperature_celsius));
+        if (logger_ != nullptr) {
+            logger_->debug("perf cpu=" + std::to_string(stats.cpu_usage_percent) +
+                           ", mem=" + std::to_string(stats.memory_usage_percent) +
+                           ", temp=" + std::to_string(stats.temperature_celsius));
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -14,7 +15,8 @@
 #include "access_websocket/websocket_client.hpp"
 #include "infra_config/config_manager.hpp"
 #include "infra_event/event_bus.hpp"
-#include "infra_log/logger.hpp"
+#include "infra_log/logger_factory.hpp"
+#include "infra_log/log_module.hpp"
 #include "infra_monitor/perf_monitor.hpp"
 #include "output_audio/audio_playback.hpp"
 #include "output_file/file_writer.hpp"
@@ -45,7 +47,8 @@ private:
     foundation::ThreadSafeQueue<foundation::Event> event_queue_;
 
     infra::ConfigManager config_manager_;
-    infra::Logger logger_;
+    infra_log::LogModule log_module_;
+    std::shared_ptr<infra_log::Logger> logger_;
     infra::PerfMonitor perf_monitor_;
     infra::EventBus event_bus_;
 

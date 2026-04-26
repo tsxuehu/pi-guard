@@ -2,18 +2,23 @@
 
 #include <string>
 
-#include "foundation/module.hpp"
+namespace piguard::infra_log {
 
-namespace piguard::infra {
-
-class Logger : public foundation::Module {
+class Logger {
 public:
-    enum class Level { Debug, Info, Warn, Error, Fatal };
+    virtual ~Logger() = default;
 
-    std::string name() const override;
-    bool start() override;
-    void stop() override;
-    void log(Level level, const std::string& message) const;
+    virtual void trace(const std::string& message) = 0;
+    virtual void debug(const std::string& message) = 0;
+    virtual void info(const std::string& message) = 0;
+    virtual void warn(const std::string& message) = 0;
+    virtual void error(const std::string& message) = 0;
+
+    virtual bool isTraceEnabled() const = 0;
+    virtual bool isDebugEnabled() const = 0;
+    virtual bool isInfoEnabled() const = 0;
+    virtual bool isWarnEnabled() const = 0;
+    virtual bool isErrorEnabled() const = 0;
 };
 
-}  // namespace piguard::infra
+}  // namespace piguard::infra_log

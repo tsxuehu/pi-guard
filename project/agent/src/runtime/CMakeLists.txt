@@ -19,7 +19,7 @@ target_link_libraries(pi_guard_runtime
         pi_guard_output_file
         pi_guard_config_manager
         pi_guard_event_bus
-        pi_guard_logger
+        pi_guard_infra_log
         pi_guard_perf_monitor
         pi_guard_http_notify
         pi_guard_rtmp_pusher
