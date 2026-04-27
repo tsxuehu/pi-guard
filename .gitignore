@@ -3,6 +3,7 @@
 Thumbs.db
 .idea/
 .vscode/
+!.vscode/settings.json
 *.swp
 *.swo
 
@@ -30,6 +31,7 @@ project/server/dist/
 *.tsbuildinfo
 
 # C/C++ / CMake（相对仓库根）
+project/agent/.cache/
 project/agent/build/
 project/agent/build-agent/
 project/agent/cmake-build-*/

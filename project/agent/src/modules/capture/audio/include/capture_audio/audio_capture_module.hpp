@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <string>
 
 #include "foundation/module.hpp"
@@ -16,11 +15,9 @@ public:
     std::string name() const override;
     bool start() override;
     void stop() override;
-    void poll_once();
 
 private:
     foundation::ThreadSafeQueue<foundation::AudioFrame>& out_queue_;
-    std::atomic<bool> running_{false};
 };
 
 }  // namespace piguard::capture

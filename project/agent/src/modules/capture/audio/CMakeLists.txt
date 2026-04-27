@@ -1,5 +1,5 @@
 add_library(pi_guard_audio_capture STATIC
-    audio_capture.cpp
+    audio_capture_module.cpp
 )
 
 target_include_directories(pi_guard_audio_capture

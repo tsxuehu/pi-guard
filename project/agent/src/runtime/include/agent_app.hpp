@@ -6,7 +6,7 @@
 #include <thread>
 #include <vector>
 
-#include "capture_audio/audio_capture.hpp"
+#include "capture_audio/audio_capture_module.hpp"
 #include "capture_video/video_capture.hpp"
 #include "foundation/thread_safe_queue.hpp"
 #include "foundation/types.hpp"

@@ -1,5 +1,6 @@
 add_library(pi_guard_video_capture STATIC
     video_capture.cpp
+    video_capture_provider.cpp
 )
 
 target_include_directories(pi_guard_video_capture
