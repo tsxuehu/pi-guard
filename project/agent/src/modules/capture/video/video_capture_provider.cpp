@@ -49,6 +49,7 @@ void VideoCaptureProvider::stop() {
 }
 
 bool VideoCaptureProvider::init_v4l2_capture() {
+    // 重新初始化前先确保旧 fd 已关闭，避免重复打开泄漏。
     close_fd();
     fd_ = open(device_.c_str(), O_RDWR);
     if (fd_ < 0) {
@@ -95,6 +96,7 @@ bool VideoCaptureProvider::configure_v4l2_capture() {
         return false;
     }
 
+    // 配置分辨率与像素格式。
     v4l2_format fmt{};
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     fmt.fmt.pix.width = static_cast<uint32_t>(capture_width_);
@@ -105,6 +107,7 @@ bool VideoCaptureProvider::configure_v4l2_capture() {
         return false;
     }
 
+    // 配置采集帧率（timeperframe = 1 / capture_fps_）。
     v4l2_streamparm parm{};
     parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     parm.parm.capture.timeperframe.numerator = 1;
@@ -116,6 +119,7 @@ bool VideoCaptureProvider::configure_v4l2_capture() {
 }
 
 bool VideoCaptureProvider::request_and_map_buffers() {
+    // 申请驱动缓冲区并映射到用户态，后续通过 buf.index 定位地址。
     v4l2_requestbuffers req{};
     req.count = kDefaultBufferCount;
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -144,6 +148,7 @@ bool VideoCaptureProvider::request_and_map_buffers() {
 }
 
 bool VideoCaptureProvider::queue_all_buffers() {
+    // 所有缓冲区先入队，驱动才能开始填帧。
     for (uint32_t i = 0; i < mmap_buffers_.size(); ++i) {
         v4l2_buffer buf{};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -178,6 +183,7 @@ void VideoCaptureProvider::stream_off() noexcept {
 }
 
 void VideoCaptureProvider::unmap_all() noexcept {
+    // 释放所有映射，避免进程退出前遗留 mmap 区域。
     for (const auto& buffer : mmap_buffers_) {
         if (buffer.start != nullptr) {
             (void)munmap(buffer.start, buffer.length);
@@ -201,6 +207,7 @@ void VideoCaptureProvider::produce_loop() {
     }
 
     while (running_) {
+        // 从驱动出队一帧；失败时让出时间片并继续重试。
         struct v4l2_buffer buf{};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
