@@ -1,49 +1,49 @@
 #include "capture_video/video_capture_provider.hpp"
 #include <utility>
 
-video_capture_provider::video_capture_provider(int v4l2_fd, size_t max_capacity)
+VideoCaptureProvider::VideoCaptureProvider(int v4l2_fd, size_t max_capacity)
     : fd_(v4l2_fd), max_capacity_(max_capacity) {}
 
-video_capture_provider::~video_capture_provider() {
+VideoCaptureProvider::~VideoCaptureProvider() {
     stop();
 }
 
-void video_capture_provider::start() {
+void VideoCaptureProvider::start() {
     if (running_.exchange(true)) return;
-    cap_thread_ = std::thread(&video_capture_provider::produce_loop, this);
+    cap_thread_ = std::thread(&VideoCaptureProvider::produce_loop, this);
 }
 
-void video_capture_provider::stop() {
+void VideoCaptureProvider::stop() {
     running_ = false;
     cv_.notify_all();
     if (cap_thread_.joinable()) cap_thread_.join();
 }
 
-void video_capture_provider::set_mmap_buffers(std::vector<void*> buffer_addrs) {
+void VideoCaptureProvider::set_mmap_buffers(std::vector<void*> buffer_addrs) {
     std::lock_guard lock(mtx_);
     mmap_buffers_ = std::move(buffer_addrs);
 }
 
-video_capture_provider::consumer_id_t video_capture_provider::register_consumer() {
+VideoCaptureProvider::consumer_id_t VideoCaptureProvider::register_consumer() {
     std::lock_guard lock(mtx_);
     const consumer_id_t id = next_consumer_id_++;
     consumers_.insert(id);
     return id;
 }
 
-void video_capture_provider::remove_consumer_from_pending_locked(consumer_id_t consumer_id) {
+void VideoCaptureProvider::remove_consumer_from_pending_locked(consumer_id_t consumer_id) {
     for (auto& item : queue_) {
         item.pending_consumers.erase(consumer_id);
     }
 }
 
-void video_capture_provider::prune_finished_frames_locked() {
+void VideoCaptureProvider::prune_finished_frames_locked() {
     while (!queue_.empty() && queue_.front().pending_consumers.empty()) {
         queue_.pop_front();
     }
 }
 
-void video_capture_provider::unregister_consumer(consumer_id_t consumer_id) {
+void VideoCaptureProvider::unregister_consumer(consumer_id_t consumer_id) {
     std::lock_guard lock(mtx_);
     consumers_.erase(consumer_id);
     remove_consumer_from_pending_locked(consumer_id);
@@ -51,7 +51,7 @@ void video_capture_provider::unregister_consumer(consumer_id_t consumer_id) {
     cv_.notify_all();
 }
 
-void video_capture_provider::produce_loop() {
+void VideoCaptureProvider::produce_loop() {
     while (running_) {
         struct v4l2_buffer buf{};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -62,7 +62,7 @@ void video_capture_provider::produce_loop() {
             continue;
         }
 
-        auto frame = std::make_shared<video_frame>();
+        auto frame = std::make_shared<VideoFrame>();
         frame->seq = ++global_seq_;
         frame->data = (buf.index < mmap_buffers_.size()) ? mmap_buffers_[buf.index] : nullptr;
         frame->length = buf.bytesused;
@@ -95,7 +95,7 @@ void video_capture_provider::produce_loop() {
     }
 }
 
-std::shared_ptr<video_frame> video_capture_provider::wait_frame(consumer_id_t consumer_id, uint64_t last_seq) {
+std::shared_ptr<VideoFrame> VideoCaptureProvider::wait_frame(consumer_id_t consumer_id, uint64_t last_seq) {
     std::unique_lock lock(mtx_);
     cv_.wait(lock, [this, consumer_id, last_seq] {
         if (!running_) {

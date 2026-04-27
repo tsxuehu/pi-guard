@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "capture_audio/audio_capture_module.hpp"
-#include "capture_video/video_capture.hpp"
+#include "capture_video/video_capture_module.hpp"
 #include "foundation/thread_safe_queue.hpp"
 #include "foundation/types.hpp"
 #include "access_http/http_notify.hpp"
@@ -52,7 +52,7 @@ private:
     infra::PerfMonitor perf_monitor_;
     infra::EventBus event_bus_;
 
-    capture_video::VideoCapture video_capture_;
+    capture_video::VideoCaptureModule video_capture_;
     capture::AudioCapture audio_capture_;
 
     processing::MotionDetect motion_detect_;

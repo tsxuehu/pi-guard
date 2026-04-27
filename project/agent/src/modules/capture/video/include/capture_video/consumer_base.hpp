@@ -6,16 +6,16 @@
 #include <thread>
 #include <atomic>
 
-class consumer_base {
+class ConsumerBase {
 public:
-    consumer_base(std::shared_ptr<video_capture_provider> provider, int target_fps)
+    ConsumerBase(std::shared_ptr<VideoCaptureProvider> provider, int target_fps)
         : provider_(std::move(provider)), target_fps_(target_fps) {
         if (provider_) {
             consumer_id_ = provider_->register_consumer();
         }
     }
 
-    virtual ~consumer_base() {
+    virtual ~ConsumerBase() {
         if (provider_ && consumer_id_ != 0) {
             provider_->unregister_consumer(consumer_id_);
         }
@@ -45,11 +45,11 @@ public:
     }
 
     void stop() { running_ = false; }
-    virtual void process(std::string_view name, const std::shared_ptr<video_frame>& frame) = 0;
+    virtual void process(std::string_view name, const std::shared_ptr<VideoFrame>& frame) = 0;
 
 protected:
-    std::shared_ptr<video_capture_provider> provider_;
-    video_capture_provider::consumer_id_t consumer_id_{0};
+    std::shared_ptr<VideoCaptureProvider> provider_;
+    VideoCaptureProvider::consumer_id_t consumer_id_{0};
     int target_fps_;
     uint64_t last_seq_{0};
     std::atomic<bool> running_{true};

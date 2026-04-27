@@ -1,5 +1,5 @@
 add_library(pi_guard_video_capture STATIC
-    video_capture.cpp
+    video_capture_module.cpp
     video_capture_provider.cpp
 )
 

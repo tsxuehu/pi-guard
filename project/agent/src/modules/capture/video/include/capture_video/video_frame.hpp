@@ -5,7 +5,7 @@
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
 
-struct video_frame {
+struct VideoFrame {
     uint64_t seq;           // 全局序列号
     void* data;             // 内存映射地址
     size_t length;          // 帧大小

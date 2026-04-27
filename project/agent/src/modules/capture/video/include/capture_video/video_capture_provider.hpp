@@ -10,16 +10,16 @@
 #include <unordered_set>
 #include <vector>
 
-class video_capture_provider {
+class VideoCaptureProvider {
 public:
     using consumer_id_t = uint64_t;
 
-    explicit video_capture_provider(int v4l2_fd, size_t max_capacity = 10);
-    ~video_capture_provider();
+    explicit VideoCaptureProvider(int v4l2_fd, size_t max_capacity = 10);
+    ~VideoCaptureProvider();
 
     // 禁用拷贝
-    video_capture_provider(const video_capture_provider&) = delete;
-    video_capture_provider& operator=(const video_capture_provider&) = delete;
+    VideoCaptureProvider(const VideoCaptureProvider&) = delete;
+    VideoCaptureProvider& operator=(const VideoCaptureProvider&) = delete;
 
     void start();
     void stop();
@@ -29,11 +29,11 @@ public:
     void unregister_consumer(consumer_id_t consumer_id);
 
     // 供不同速率消费者获取可用帧；自动将更老帧标记为 skipped
-    std::shared_ptr<video_frame> wait_frame(consumer_id_t consumer_id, uint64_t last_seq);
+    std::shared_ptr<VideoFrame> wait_frame(consumer_id_t consumer_id, uint64_t last_seq);
 
 private:
     struct queued_frame {
-        std::shared_ptr<video_frame> frame;
+        std::shared_ptr<VideoFrame> frame;
         std::unordered_set<consumer_id_t> pending_consumers;
     };
 
