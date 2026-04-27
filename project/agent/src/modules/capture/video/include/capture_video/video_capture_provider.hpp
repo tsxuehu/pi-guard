@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <thread>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -14,7 +15,12 @@ class VideoCaptureProvider {
 public:
     using consumer_id_t = uint64_t;
 
-    explicit VideoCaptureProvider(int v4l2_fd, size_t max_capacity = 10);
+    VideoCaptureProvider(
+        std::string device,
+        int capture_fps,
+        int capture_width,
+        int capture_height,
+        size_t max_capacity = 10);
     ~VideoCaptureProvider();
 
     // 禁用拷贝
@@ -23,7 +29,7 @@ public:
 
     void start();
     void stop();
-    void set_mmap_buffers(std::vector<void*> buffer_addrs);
+    int capture_fps() const { return capture_fps_; }
 
     consumer_id_t register_consumer();
     void unregister_consumer(consumer_id_t consumer_id);
@@ -37,16 +43,34 @@ private:
         std::unordered_set<consumer_id_t> pending_consumers;
     };
 
+    struct mmap_buffer {
+        void* start{nullptr};
+        size_t length{0};
+    };
+
+    bool init_v4l2_capture();
+    bool configure_v4l2_capture();
+    bool request_and_map_buffers();
+    bool queue_all_buffers();
+    bool stream_on();
+    void stream_off() noexcept;
+    void unmap_all() noexcept;
+    void close_fd() noexcept;
     void produce_loop();
     void remove_consumer_from_pending_locked(consumer_id_t consumer_id);
     void prune_finished_frames_locked();
 
+    std::string device_;
     int fd_;
+    int capture_fps_;
+    int capture_width_;
+    int capture_height_;
     size_t max_capacity_;
     uint64_t global_seq_{0};
     consumer_id_t next_consumer_id_{1};
     std::atomic<bool> running_{false};
-    std::vector<void*> mmap_buffers_;
+    bool stream_on_{false};
+    std::vector<mmap_buffer> mmap_buffers_;
     std::unordered_set<consumer_id_t> consumers_;
     std::deque<queued_frame> queue_;
     std::mutex mtx_;

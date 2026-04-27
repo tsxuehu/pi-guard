@@ -22,9 +22,9 @@ public:
     }
 
     void run(std::string_view name) {
-        // 假设源帧率为 30fps，计算步长。
-        // 如果 target_fps 为 15，step 为 2，则每两帧处理一帧。
-        const int step = (target_fps_ >= 30 || target_fps_ <= 0) ? 1 : (30 / target_fps_);
+        const int source_fps = (provider_ && provider_->capture_fps() > 0) ? provider_->capture_fps() : 30;
+        // 如果 target_fps 为 15，source_fps 为 30，step 为 2，则每两帧处理一帧。
+        const int step = (target_fps_ >= source_fps || target_fps_ <= 0) ? 1 : (source_fps / target_fps_);
 
         while (running_) {
             auto frame = provider_->wait_frame(consumer_id_, last_seq_);

@@ -1,31 +1,28 @@
 #include "frame_viewer_consumer.hpp"
-#include "v4l2_capture_session.hpp"
 
 #include <opencv2/highgui.hpp>
 
 #include <iostream>
 #include <string>
 
+namespace {
+constexpr int kWidth = 640;
+constexpr int kHeight = 480;
+constexpr int kCaptureFps = 30;
+constexpr size_t kProviderQueueCapacity = 30;
+constexpr char kWindowName[] = "pi-guard-view-video";
+}  // namespace
+
 int main(int argc, char** argv) {
     const std::string device = (argc > 1) ? argv[1] : "/dev/video0";
-    constexpr int kWidth = 640;
-    constexpr int kHeight = 480;
-    constexpr uint32_t kBufferCount = 4;
 
     try {
-        V4L2CaptureSession session({
-            .device = device,
-            .width = kWidth,
-            .height = kHeight,
-            .buffer_count = kBufferCount,
-        });
-
-        auto provider = std::make_shared<VideoCaptureProvider>(session.fd(), 30);
-        provider->set_mmap_buffers(session.buffer_addrs());
+        auto provider = std::make_shared<VideoCaptureProvider>(
+            device, kCaptureFps, kWidth, kHeight, kProviderQueueCapacity);
         provider->start();
 
-        cv::namedWindow("pi-guard-view-video", cv::WINDOW_AUTOSIZE);
-        FrameViewerConsumer consumer(provider, 30, kWidth, kHeight);
+        cv::namedWindow(kWindowName, cv::WINDOW_AUTOSIZE);
+        FrameViewerConsumer consumer(provider, kCaptureFps, kWidth, kHeight);
         consumer.run("viewer");
 
         provider->stop();

@@ -1,8 +1,34 @@
 #include "capture_video/video_capture_provider.hpp"
+
+#include <cerrno>
+#include <fcntl.h>
+#include <linux/videodev2.h>
+#include <sys/mman.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
 #include <utility>
 
-VideoCaptureProvider::VideoCaptureProvider(int v4l2_fd, size_t max_capacity)
-    : fd_(v4l2_fd), max_capacity_(max_capacity) {}
+namespace {
+constexpr uint32_t kDefaultBufferCount = 4;
+
+int xioctl(int fd, unsigned long request, void* arg) {
+    int ret = -1;
+    do {
+        ret = ioctl(fd, request, arg);
+    } while (ret == -1 && errno == EINTR);
+    return ret;
+}
+}  // namespace
+
+VideoCaptureProvider::VideoCaptureProvider(
+    std::string device, int capture_fps, int capture_width, int capture_height, size_t max_capacity)
+    : device_(std::move(device)),
+      fd_(-1),
+      capture_fps_(capture_fps),
+      capture_width_(capture_width),
+      capture_height_(capture_height),
+      max_capacity_(max_capacity) {}
 
 VideoCaptureProvider::~VideoCaptureProvider() {
     stop();
@@ -16,12 +42,25 @@ void VideoCaptureProvider::start() {
 void VideoCaptureProvider::stop() {
     running_ = false;
     cv_.notify_all();
+    stream_off();
     if (cap_thread_.joinable()) cap_thread_.join();
+    unmap_all();
+    close_fd();
 }
 
-void VideoCaptureProvider::set_mmap_buffers(std::vector<void*> buffer_addrs) {
-    std::lock_guard lock(mtx_);
-    mmap_buffers_ = std::move(buffer_addrs);
+bool VideoCaptureProvider::init_v4l2_capture() {
+    close_fd();
+    fd_ = open(device_.c_str(), O_RDWR);
+    if (fd_ < 0) {
+        return false;
+    }
+    if (!configure_v4l2_capture() || !request_and_map_buffers() || !queue_all_buffers() || !stream_on()) {
+        stream_off();
+        unmap_all();
+        close_fd();
+        return false;
+    }
+    return true;
 }
 
 VideoCaptureProvider::consumer_id_t VideoCaptureProvider::register_consumer() {
@@ -51,7 +90,116 @@ void VideoCaptureProvider::unregister_consumer(consumer_id_t consumer_id) {
     cv_.notify_all();
 }
 
+bool VideoCaptureProvider::configure_v4l2_capture() {
+    if (fd_ < 0 || capture_fps_ <= 0 || capture_width_ <= 0 || capture_height_ <= 0) {
+        return false;
+    }
+
+    v4l2_format fmt{};
+    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    fmt.fmt.pix.width = static_cast<uint32_t>(capture_width_);
+    fmt.fmt.pix.height = static_cast<uint32_t>(capture_height_);
+    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+    fmt.fmt.pix.field = V4L2_FIELD_ANY;
+    if (xioctl(fd_, VIDIOC_S_FMT, &fmt) < 0) {
+        return false;
+    }
+
+    v4l2_streamparm parm{};
+    parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    parm.parm.capture.timeperframe.numerator = 1;
+    parm.parm.capture.timeperframe.denominator = static_cast<uint32_t>(capture_fps_);
+    if (xioctl(fd_, VIDIOC_S_PARM, &parm) < 0) {
+        return false;
+    }
+    return true;
+}
+
+bool VideoCaptureProvider::request_and_map_buffers() {
+    v4l2_requestbuffers req{};
+    req.count = kDefaultBufferCount;
+    req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    req.memory = V4L2_MEMORY_MMAP;
+    if (xioctl(fd_, VIDIOC_REQBUFS, &req) < 0 || req.count < 2) {
+        return false;
+    }
+
+    mmap_buffers_.resize(req.count);
+    for (uint32_t i = 0; i < req.count; ++i) {
+        v4l2_buffer buf{};
+        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index = i;
+        if (xioctl(fd_, VIDIOC_QUERYBUF, &buf) < 0) {
+            return false;
+        }
+
+        void* start = mmap(nullptr, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, buf.m.offset);
+        if (start == MAP_FAILED) {
+            return false;
+        }
+        mmap_buffers_[i] = {start, buf.length};
+    }
+    return true;
+}
+
+bool VideoCaptureProvider::queue_all_buffers() {
+    for (uint32_t i = 0; i < mmap_buffers_.size(); ++i) {
+        v4l2_buffer buf{};
+        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index = i;
+        if (xioctl(fd_, VIDIOC_QBUF, &buf) < 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool VideoCaptureProvider::stream_on() {
+    if (fd_ < 0) {
+        return false;
+    }
+    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (xioctl(fd_, VIDIOC_STREAMON, &type) < 0) {
+        return false;
+    }
+    stream_on_ = true;
+    return true;
+}
+
+void VideoCaptureProvider::stream_off() noexcept {
+    if (!stream_on_ || fd_ < 0) {
+        return;
+    }
+    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    (void)xioctl(fd_, VIDIOC_STREAMOFF, &type);
+    stream_on_ = false;
+}
+
+void VideoCaptureProvider::unmap_all() noexcept {
+    for (const auto& buffer : mmap_buffers_) {
+        if (buffer.start != nullptr) {
+            (void)munmap(buffer.start, buffer.length);
+        }
+    }
+    mmap_buffers_.clear();
+}
+
+void VideoCaptureProvider::close_fd() noexcept {
+    if (fd_ >= 0) {
+        close(fd_);
+        fd_ = -1;
+    }
+}
+
 void VideoCaptureProvider::produce_loop() {
+    if (!init_v4l2_capture()) {
+        running_ = false;
+        cv_.notify_all();
+        return;
+    }
+
     while (running_) {
         struct v4l2_buffer buf{};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -64,7 +212,7 @@ void VideoCaptureProvider::produce_loop() {
 
         auto frame = std::make_shared<VideoFrame>();
         frame->seq = ++global_seq_;
-        frame->data = (buf.index < mmap_buffers_.size()) ? mmap_buffers_[buf.index] : nullptr;
+        frame->data = (buf.index < mmap_buffers_.size()) ? mmap_buffers_[buf.index].start : nullptr;
         frame->length = buf.bytesused;
 
         // 【关键】引用计数回收逻辑
