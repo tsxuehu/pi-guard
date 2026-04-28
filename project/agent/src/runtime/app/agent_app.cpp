@@ -80,14 +80,14 @@ void AgentApp::start_threads() {
 
     workers_.emplace_back([this]() {
         while (running_.load()) {
-            video_capture_.poll_once();
+            // video_capture_.poll_once();
             std::this_thread::sleep_for(33ms);
         }
     });
 
     workers_.emplace_back([this]() {
         while (running_.load()) {
-            audio_capture_.poll_once();
+            // audio_capture_.poll_once();
             std::this_thread::sleep_for(20ms);
         }
     });
