@@ -1,0 +1,71 @@
+# project/agent 构建说明
+
+树莓派侧 C++ 代理 `pi-guard-agent` 位于 `project/agent`，使用 **CMake** 组织，主工程与模块子目录各自提供 `CMakeLists.txt`。
+
+## 环境与工具
+
+| 项 | 要求 |
+|----|------|
+| CMake | **≥ 3.16** |
+| 编译器 | 支持 **C++17** 的 g++/clang++ |
+| 标准 | `CMAKE_CXX_STANDARD` 为 **17**，扩展关闭 |
+
+根 `CMakeLists.txt` 开启 `CMAKE_EXPORT_COMPILE_COMMANDS`，配置后会在构建目录生成 `compile_commands.json`，便于 IDE/clangd。
+
+## CMake 已声明的外部依赖
+
+当前脚本中显式通过 `find_package` 拉取的依赖如下（其余系统库若后续在源码中直接链接，需自行安装对应 dev 包）：
+
+| 依赖 | 用途 |
+|------|------|
+| **spdlog** | `src/modules/infra/log`（`PI_GUARD_LOG_BACKEND=spdlog` 时） |
+| **OpenCV**（core、highgui、imgproc） | 工具 `cli/preview-video` |
+
+Ubuntu 上可安装例如：
+
+```bash
+sudo apt install build-essential cmake pkg-config \
+  libspdlog-dev libopencv-dev
+```
+
+## 基本构建
+
+在仓库内进入 agent 目录， out-of-source 构建：
+
+```bash
+cd project/agent
+cmake -B build -S .
+cmake --build build -j"$(nproc)"
+```
+
+- 主可执行文件：`build/pi-guard-agent`（链接静态库 `pi_guard_runtime`，后者再链上各模块库）。
+- 可选工具：`build/cli/preview-video/preview-video`（若子目录成功配置）。
+
+安装前缀（默认随 CMake 安装规则）：
+
+```bash
+cmake --install build --prefix /usr/local
+```
+
+可执行文件安装到 `bin/`（见根 `CMakeLists.txt` 中 `install(TARGETS pi-guard-agent ...)`）。
+
+## 常用 CMake 选项
+
+| 选项 | 说明 |
+|------|------|
+| `PI_GUARD_LOG_BACKEND` | 日志后端，当前仅支持 **spdlog**（默认），其他值会在配置阶段报错。 |
+| `BUILD_TESTING` | 与 **CTest** 配合；为 `ON`（默认常随 `include(CTest)`）时加入 `tests/` 子目录，生成如 `pi_guard_foundation_tests` 等测试可执行文件。构建后可在构建目录执行 `ctest`。 |
+| `-DCMAKE_BUILD_TYPE=Release\|Debug` | 构建类型，按需要指定。 |
+
+示例（Release + 关闭测试）：
+
+```bash
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+cmake --build build -j"$(nproc)"
+```
+
+## 工程内 CMake 拓扑（摘要）
+
+根目录依次 `add_subdirectory`：**foundation → 各 capture/processing/output/infra/external_access 模块 → runtime → cli**，再定义可执行文件 `pi-guard-agent`（`src/main.cpp`），`PRIVATE` 包含 `include/`，链接 `pi_guard_runtime`。
+
+模块与目标名一览见 `docs/agent/工程结构.md`；构建目录名（如 `build`）请勿提交版本库。
