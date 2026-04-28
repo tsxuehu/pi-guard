@@ -3,13 +3,16 @@
 #include "video_capture_provider.hpp"
 #include <string_view>
 #include <chrono>
-#include <thread>
 #include <atomic>
+#include <stdexcept>
 
 class ConsumerBase {
 public:
     ConsumerBase(std::shared_ptr<VideoCaptureProvider> provider, int target_fps)
         : provider_(std::move(provider)), target_fps_(target_fps) {
+        if (target_fps_ <= 0) {
+            throw std::invalid_argument("target_fps must be > 0");
+        }
         if (provider_) {
             consumer_id_ = provider_->register_consumer();
         }
@@ -22,25 +25,30 @@ public:
     }
 
     void run(std::string_view name) {
-        const int source_fps = (provider_ && provider_->capture_fps() > 0) ? provider_->capture_fps() : 30;
+        const int source_fps = provider_->capture_fps();
         // 如果 target_fps 为 15，source_fps 为 30，step 为 2，则每两帧处理一帧。
-        const int step = (target_fps_ >= source_fps || target_fps_ <= 0) ? 1 : (source_fps / target_fps_);
+        const int step = (target_fps_ >= source_fps) ? 1 : (source_fps / target_fps_);
+        const auto process_interval = std::chrono::milliseconds(1000 / target_fps_);
+        auto next_process_time = std::chrono::steady_clock::now();
 
         while (running_) {
             auto frame = provider_->wait_frame(consumer_id_, last_seq_);
             if (!frame) break;
 
+            bool should_process = true;
+            const auto now = std::chrono::steady_clock::now();
+            if (now < next_process_time) {
+                should_process = false;
+            } else {
+                next_process_time = now + process_interval;
+            }
+
             // 多个消费者可以获取同一个 frame 引用
-            if (frame->seq % step == 0) {
+            if (should_process && frame->seq % step == 0) {
                 process(name, frame);
             }
 
             last_seq_ = frame->seq;
-
-            // 通过控制消费间隔产生反压，使消费者自动跳到最新帧
-            if (target_fps_ > 0) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000 / target_fps_));
-            }
         }
     }
 
