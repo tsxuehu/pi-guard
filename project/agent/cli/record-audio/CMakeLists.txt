@@ -1,5 +1,6 @@
 add_executable(record-audio
     main.cpp
+    shutdown_manager.cpp
     wav_writer.cpp
     recording_consumer.cpp
 )

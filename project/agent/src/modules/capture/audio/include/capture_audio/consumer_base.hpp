@@ -1,11 +1,16 @@
 #pragma once
 
 #include "audio_capture_provider.hpp"
+#include "infra_log/logger_factory.hpp"
+#include "infra_log/logger.hpp"
 #include <atomic>
 #include <memory>
 #include <string>
 
 namespace piguard::capture_audio {
+    namespace {
+        const std::shared_ptr<infra_log::Logger> logger = infra_log::LogFactory::getLogger("AudioConsumerBase");
+    }
 
 /**
  * 与采集线程同频消费：生产者每 enqueue 一包，consumer 即从 wait_audio 取到并 process。

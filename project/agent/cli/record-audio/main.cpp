@@ -2,6 +2,7 @@
 #include "infra_log/logger_factory.hpp"
 #include "infra_log/logger.hpp"
 #include "recording_consumer.hpp"
+#include "shutdown_manager.hpp"
 
 #include <cerrno>
 #include <csignal>
@@ -10,7 +11,6 @@
 #include <memory>
 #include <string>
 #include <thread>
-#include <unistd.h>
 
 namespace {
 const std::shared_ptr<piguard::infra_log::Logger> logger = 
@@ -21,13 +21,6 @@ constexpr const char* kAlsaDevice = "plughw:0,6";
 constexpr const char* kOutFileName = ".tmp/record.wav";
 constexpr unsigned kSampleRateHz = 16000;
 constexpr unsigned kChannels = 1;
-volatile std::sig_atomic_t g_stop_requested = 0;
-
-void signal_handler(int signum) {
-    if (signum == SIGINT || signum == SIGTERM) {
-        g_stop_requested = 1;
-    }
-}
 
 }  // namespace
 
@@ -42,8 +35,8 @@ int main() {
         }
     }
 
-    if (std::signal(SIGINT, signal_handler) == SIG_ERR ||
-        std::signal(SIGTERM, signal_handler) == SIG_ERR) {
+    if (std::signal(SIGINT, ShutdownManager::handle_signal) == SIG_ERR ||
+        std::signal(SIGTERM, ShutdownManager::handle_signal) == SIG_ERR) {
         logger->error("failed to register signal handler");
         return 1;
     }
@@ -67,14 +60,14 @@ int main() {
     std::thread capture([&]() { consumer.run(); });
 
     logger->info("recording started, output=" + out_path.string() +
-                 ", press Ctrl+C to stop (signal callback)");
+                 ", press Ctrl+C to stop");
 
     logger->info("waiting stop signal");
-    while (!g_stop_requested) {
-        if (::pause() == -1 && errno == EINTR && g_stop_requested) {
-            break;
-        }
-    }
+    ShutdownManager::wait_for_shutdown();
+
+    logger->info("signal received, calling provider stop");
+    provider->stop();
+    logger->info("provider stop returned");
 
     logger->info("waiting capture thread");
     capture.join();
