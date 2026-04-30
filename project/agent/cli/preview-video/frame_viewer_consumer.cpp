@@ -4,11 +4,16 @@
 
 #include <opencv2/highgui.hpp>
 
-FrameViewerConsumer::FrameViewerConsumer(
-    std::shared_ptr<VideoCaptureProvider> provider, int target_fps, int width, int height)
-    : ConsumerBase(std::move(provider), target_fps), width_(width), height_(height) {}
+FrameViewerConsumer::FrameViewerConsumer(std::shared_ptr<VideoCaptureProvider> provider,
+                                           int target_fps,
+                                           std::string consumer_name,
+                                           int width,
+                                           int height)
+    : ConsumerBase(std::move(provider), target_fps, std::move(consumer_name)),
+      width_(width),
+      height_(height) {}
 
-void FrameViewerConsumer::process(std::string_view, const std::shared_ptr<VideoFrame>& frame) {
+void FrameViewerConsumer::process(const std::shared_ptr<VideoFrame>& frame) {
     if (frame->data == nullptr || frame->length < static_cast<size_t>(width_ * height_ * 2)) {
         return;
     }

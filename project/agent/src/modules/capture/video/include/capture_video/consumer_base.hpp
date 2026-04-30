@@ -1,15 +1,18 @@
 #pragma once
 
 #include "video_capture_provider.hpp"
-#include <string_view>
 #include <chrono>
 #include <atomic>
+#include <memory>
 #include <stdexcept>
+#include <string>
 
 class ConsumerBase {
 public:
-    ConsumerBase(std::shared_ptr<VideoCaptureProvider> provider, int target_fps)
-        : provider_(std::move(provider)), target_fps_(target_fps) {
+    ConsumerBase(std::shared_ptr<VideoCaptureProvider> provider, int target_fps, std::string consumer_name)
+        : provider_(std::move(provider)),
+          target_fps_(target_fps),
+          name_(std::move(consumer_name)) {
         if (target_fps_ <= 0) {
             throw std::invalid_argument("target_fps must be > 0");
         }
@@ -19,12 +22,12 @@ public:
     }
 
     virtual ~ConsumerBase() {
-        if (provider_ && consumer_id_ != 0) {
+        if (provider_) {
             provider_->unregister_consumer(consumer_id_);
         }
     }
 
-    void run(std::string_view name) {
+    void run() {
         const int source_fps = provider_->capture_fps();
         // 如果 target_fps 为 15，source_fps 为 30，step 为 2，则每两帧处理一帧。
         const int step = (target_fps_ >= source_fps) ? 1 : (source_fps / target_fps_);
@@ -45,7 +48,7 @@ public:
 
             // 多个消费者可以获取同一个 frame 引用
             if (should_process && frame->seq % step == 0) {
-                process(name, frame);
+                process(frame);
             }
 
             last_seq_ = frame->seq;
@@ -53,10 +56,14 @@ public:
     }
 
     void stop() { running_ = false; }
-    virtual void process(std::string_view name, const std::shared_ptr<VideoFrame>& frame) = 0;
+
+    const std::string& name() const { return name_; }
+
+    virtual void process(const std::shared_ptr<VideoFrame>& frame) = 0;
 
 protected:
     std::shared_ptr<VideoCaptureProvider> provider_;
+    std::string name_;
     VideoCaptureProvider::consumer_id_t consumer_id_{0};
     int target_fps_;
     uint64_t last_seq_{0};

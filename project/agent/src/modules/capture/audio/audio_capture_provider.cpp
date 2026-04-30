@@ -1,19 +1,24 @@
 #include "capture_audio/audio_capture_provider.hpp"
-#include <alsa/asoundlib.h>
-#include <chrono>
 
-AudioCaptureProvider::AudioCaptureProvider(const std::string& device)
-    : device_(device) {}
+#include <alsa/asoundlib.h>
+
+#include <chrono>
+#include <string>
+#include <utility>
+
+AudioCaptureProvider::AudioCaptureProvider(std::string device,
+                                           unsigned int sample_rate_hz,
+                                           unsigned int channels)
+    : device_(std::move(device)),
+      sample_rate_(sample_rate_hz),
+      channels_(channels) {}
 
 AudioCaptureProvider::~AudioCaptureProvider() {
     stop();
 }
 
-bool AudioCaptureProvider::start(unsigned int rate, unsigned int channels) {
+bool AudioCaptureProvider::start() {
     if (running_.exchange(true)) return true;
-
-    sample_rate_ = rate;
-    channels_ = channels;
 
     produce_thread_ = std::thread(&AudioCaptureProvider::produce_loop, this);
     return true;
@@ -96,8 +101,10 @@ void AudioCaptureProvider::produce_loop() {
                        1,      
                        50000); 
 
-    const int frame_size = 320; // 20ms @ 16kHz
-    std::vector<int16_t> buffer(frame_size * channels_);
+    // 每片约 20ms，与 ctor 传入的采样率一致
+    const unsigned frame_size =
+        (sample_rate_ > 0) ? (sample_rate_ * 20u / 1000u) : 320u;
+    std::vector<int16_t> buffer(static_cast<size_t>(frame_size) * channels_);
 
     while (running_) {
         int frames = snd_pcm_readi(handle, buffer.data(), frame_size);

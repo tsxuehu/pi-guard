@@ -25,7 +25,22 @@ Ubuntu 上可安装例如：
 
 ```bash
 sudo apt install build-essential cmake pkg-config \
-  libspdlog-dev libopencv-dev
+  libspdlog-dev libopencv-dev libasound2-dev
+```
+
+### 音频采集依赖（ALSA）
+
+`capture/audio` 模块中的 **`audio_capture_provider` 依赖 ALSA**（源码包含 `alsa/asoundlib.h`），在 Debian / Ubuntu / Raspberry Pi OS 上需安装开发库以便编译并链接 `-lasound`。
+
+| 用途 | 包名 |
+|------|------|
+| 头文件与链接库 | **`libasound2-dev`** |
+| 运行时（设备节点与动态库） | **`libasound2`**（多数镜像已预装；若极简环境缺库再单独安装） |
+
+仅开发本机可先执行：
+
+```bash
+sudo apt install libasound2-dev
 ```
 
 ## 基本构建

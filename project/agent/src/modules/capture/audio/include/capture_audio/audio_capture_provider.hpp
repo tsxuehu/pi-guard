@@ -1,23 +1,15 @@
 #pragma once
 
-#include <iostream>
-#include <vector>
-#include <memory>
-#include <mutex>
+#include "audio_frame.hpp"
+
+#include <atomic>
 #include <condition_variable>
 #include <list>
+#include <memory>
+#include <mutex>
 #include <set>
-#include <atomic>
+#include <string>
 #include <thread>
-
-/**
- * @brief 音频帧数据封装
- */
-struct audio_frame {
-    uint64_t seq;
-    std::vector<int16_t> pcm_data; // PCM S16_LE 格式数据
-    uint64_t timestamp;            // 纳秒级或毫秒级时间戳
-};
 
 /**
  * @brief 音频捕获提供者
@@ -32,19 +24,23 @@ public:
         std::set<consumer_id_t> pending_consumers; // 尚未处理此段的消费者集合
     };
 
-    explicit AudioCaptureProvider(const std::string& device = "default");
+    /**
+     * @param device ALSA PCM 名称，如 default、plughw:0,7
+     * @param sample_rate_hz 采样率（与 snd_pcm_set_params / 单次 read 的 20ms 片长一致推导）
+     * @param channels 通道数（1 为单声道）
+     */
+    explicit AudioCaptureProvider(std::string device = "default",
+                                  unsigned int sample_rate_hz = 16000,
+                                  unsigned int channels = 1);
+
     ~AudioCaptureProvider();
 
     // 禁用拷贝语义
     AudioCaptureProvider(const AudioCaptureProvider&) = delete;
     AudioCaptureProvider& operator=(const AudioCaptureProvider&) = delete;
 
-    /**
-     * @brief 启动采集线程
-     * @param rate 采样率，默认 16000Hz (SpeexDSP 推荐)
-     * @param channels 通道数，默认 1 (单声道)
-     */
-    bool start(unsigned int rate = 16000, unsigned int channels = 1);
+    /** 启动 ALSA 采集线程（采样率 / 声道数已由构造传入） */
+    bool start();
 
     /**
      * @brief 停止采集并清理资源
@@ -77,8 +73,8 @@ private:
 
 private:
     std::string device_;
-    unsigned int sample_rate_ = 16000;
-    unsigned int channels_ = 1;
+    unsigned int sample_rate_;
+    unsigned int channels_;
     const size_t max_queue_capacity_ = 50; // 约 1 秒的缓冲区
 
     std::atomic<bool> running_{false};

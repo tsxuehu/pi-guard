@@ -22,8 +22,8 @@ int main(int argc, char** argv) {
         provider->start();
 
         cv::namedWindow(kWindowName, cv::WINDOW_AUTOSIZE);
-        FrameViewerConsumer consumer(provider, kCaptureFps, kWidth, kHeight);
-        consumer.run("viewer");
+        FrameViewerConsumer consumer(provider, kCaptureFps, "viewer", kWidth, kHeight);
+        consumer.run();
 
         provider->stop();
     } catch (const std::exception& ex) {
