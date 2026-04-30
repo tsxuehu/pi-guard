@@ -6,7 +6,6 @@ namespace piguard::app {
 
 AgentApp::AgentApp(std::string config_path)
     : config_manager_(std::move(config_path)),
-      video_capture_(video_queue_),
       audio_capture_(audio_queue_),
       motion_detect_(video_queue_, event_queue_),
       file_writer_(event_queue_) {}

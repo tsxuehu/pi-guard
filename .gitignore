@@ -6,7 +6,7 @@ Thumbs.db
 !.vscode/settings.json
 *.swp
 *.swo
-
+.tmp/
 # Logs
 *.log
 npm-debug.log*

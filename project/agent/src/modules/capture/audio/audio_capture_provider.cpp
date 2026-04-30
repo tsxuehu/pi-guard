@@ -38,13 +38,28 @@ bool AudioCaptureProvider::start() {
 void AudioCaptureProvider::stop() {
     if (!running_.exchange(false)) return;
 
+    // 先在采集 PCM 上 drop，打断可能仍为阻塞或非阻塞链路里卡住的 read
+    {
+        std::lock_guard<std::mutex> pcm_lk(pcm_drop_mtx_);
+        if (pcm_for_drop_ != nullptr) {
+            (void)snd_pcm_drop(static_cast<snd_pcm_t*>(pcm_for_drop_));
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(queue_mtx_);
+        cv_.notify_all();
+    }
+
     if (produce_thread_.joinable()) {
         produce_thread_.join();
     }
 
-    std::lock_guard<std::mutex> lock(queue_mtx_);
-    queue_.clear();
-    cv_.notify_all();
+    {
+        std::lock_guard<std::mutex> lock(queue_mtx_);
+        queue_.clear();
+        cv_.notify_all();
+    }
 }
 
 AudioCaptureProvider::consumer_id_t AudioCaptureProvider::register_consumer() {
@@ -72,12 +87,19 @@ std::shared_ptr<audio_frame> AudioCaptureProvider::wait_audio(consumer_id_t id, 
     std::unique_lock<std::mutex> lock(queue_mtx_);
 
     cv_.wait(lock, [this, id, last_seq] {
-        return !running_ || find_latest_frame_locked(id, last_seq) != queue_.end();
+        return !running_.load(std::memory_order_acquire) ||
+               find_latest_frame_locked(id, last_seq) != queue_.end();
     });
 
-    if (!running_) return nullptr;
+    if (!running_.load(std::memory_order_acquire)) {
+        return nullptr;
+    }
 
     auto it = find_latest_frame_locked(id, last_seq);
+    if (it == queue_.end()) {
+        return nullptr;
+    }
+
     auto target_frame = it->frame;
 
     // 自动清理：标记该消费者已处理当前及之前的所有帧
@@ -96,14 +118,16 @@ std::shared_ptr<audio_frame> AudioCaptureProvider::wait_audio(consumer_id_t id, 
 
 void AudioCaptureProvider::produce_loop() {
     snd_pcm_t* handle = nullptr;
-    
-    // 使用 SND_PCM_NONBLOCK 结合适当的等待策略或直接阻塞读取
+
     if (snd_pcm_open(&handle, device_.c_str(), SND_PCM_STREAM_CAPTURE, 0) < 0) {
         running_ = false;
+        {
+            std::lock_guard<std::mutex> lock(queue_mtx_);
+            cv_.notify_all();
+        }
         return;
     }
 
-    // 设置硬件参数
     snd_pcm_set_params(handle, 
                        SND_PCM_FORMAT_S16_LE, 
                        SND_PCM_ACCESS_RW_INTERLEAVED,
@@ -112,18 +136,29 @@ void AudioCaptureProvider::produce_loop() {
                        1,      
                        50000); 
 
-    // 每片约 20ms，与 ctor 传入的采样率一致
+    (void)snd_pcm_nonblock(handle, 1);
+
+    {
+        std::lock_guard<std::mutex> pcm_lk(pcm_drop_mtx_);
+        pcm_for_drop_ = handle;
+    }
+
     const unsigned frame_size =
         (sample_rate_ > 0) ? (sample_rate_ * 20u / 1000u) : 320u;
     std::vector<int16_t> buffer(static_cast<size_t>(frame_size) * channels_);
 
-    while (running_) {
+    while (running_.load(std::memory_order_acquire)) {
         int frames = snd_pcm_readi(handle, buffer.data(), frame_size);
-        
+
         if (frames == -EPIPE) {
             snd_pcm_prepare(handle);
             continue;
-        } else if (frames < 0) {
+        }
+        if (frames == -EAGAIN) {
+            (void)snd_pcm_wait(handle, 20);
+            continue;
+        }
+        if (frames < 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
@@ -144,7 +179,11 @@ void AudioCaptureProvider::produce_loop() {
         cv_.notify_all();
     }
 
-    snd_pcm_close(handle);
+    {
+        std::lock_guard<std::mutex> pcm_lk(pcm_drop_mtx_);
+        pcm_for_drop_ = nullptr;
+    }
+    (void)snd_pcm_close(handle);
 }
 
 std::list<AudioCaptureProvider::queued_audio>::iterator 
