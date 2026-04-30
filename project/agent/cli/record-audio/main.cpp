@@ -2,15 +2,12 @@
 #include "recording_consumer.hpp"
 
 #include <atomic>
-#include <chrono>
-#include <condition_variable>
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <iostream>
 #include <memory>
-#include <mutex>
 #include <pthread.h>
 #include <signal.h>
 #include <string>
@@ -23,7 +20,6 @@ namespace {
 /** arecord -l: card 0 / device 6 — sof-hda-dsp DMIC */
 constexpr const char* kAlsaDevice = "plughw:0,6";
 constexpr const char* kOutFileName = ".tmp/record.wav";
-constexpr int kRecordSeconds = 5;
 constexpr unsigned kSampleRateHz = 16000;
 constexpr unsigned kChannels = 1;
 
@@ -31,6 +27,14 @@ constexpr unsigned kChannels = 1;
 
 int main() {
     const std::filesystem::path out_path = std::filesystem::current_path() / kOutFileName;
+    if (std::filesystem::exists(out_path)) {
+        std::error_code ec;
+        if (!std::filesystem::remove(out_path, ec) || ec) {
+            std::cerr << "record-audio: 无法删除已存在文件 " << out_path
+                      << ": " << ec.message() << '\n';
+            return 1;
+        }
+    }
 
     sigset_t sigmask;
     sigemptyset(&sigmask);
@@ -59,40 +63,16 @@ int main() {
 
     RecordingConsumer consumer(provider, "record-cli", std::move(wav));
 
-    std::mutex stop_mtx;
-    std::condition_variable stop_cv;
-    std::atomic<bool> shutting_down{false};
+    std::atomic<bool> stop_requested{false};
 
-    auto request_stop = [&]() {
-        const bool first = !shutting_down.exchange(true);
-        if (first) {
-            provider->stop();
-        }
-        stop_cv.notify_all();
-    };
-
-    std::thread capture([&]() { consumer.run(); });
-
-    std::thread timer([&]() {
-        std::unique_lock<std::mutex> lk(stop_mtx);
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::seconds(kRecordSeconds);
-        const bool stopped_early = stop_cv.wait_until(
-            lk,
-            deadline,
-            [&]() { return shutting_down.load(std::memory_order_acquire); });
-        lk.unlock();
-        // 若为超时（非提前停机），再走一次停机；已与 SIG 停机去重。
-        if (!stopped_early) {
-            request_stop();
-        }
-    });
+    auto request_stop = [&]() { stop_requested.store(true, std::memory_order_release); };
 
     std::thread sig_reader([&]() {
         for (;;) {
             signalfd_siginfo si{};
             const ssize_t n = ::read(sigfd, &si, sizeof(si));
             if (n == static_cast<ssize_t>(sizeof(si))) {
+                std::cerr << "record-audio: signal received, requesting stop\n";
                 request_stop();
                 return;
             }
@@ -105,24 +85,28 @@ int main() {
 
     if (!provider->start()) {
         std::cerr << "record-audio: start 失败\n";
-        request_stop();
+        stop_requested.store(true, std::memory_order_release);
         (void)close(sigfd);
-        capture.join();
-        timer.join();
         sig_reader.join();
         return 1;
     }
 
+    std::thread capture([&]() { consumer.run(); });
+
     std::cerr << "录制中… 写入 " << out_path.string()
-              << "\nCtrl+C 结束（signalfd 阻塞等待，不写轮询）；最长 " << kRecordSeconds << " s\n";
+              << "\nCtrl+C 结束（signalfd 阻塞等待，不写轮询）\n";
 
-    capture.join();
-
-    (void)close(sigfd);  // 唤醒阻塞在 read 的信号线程以便退出
+    std::cerr << "record-audio: waiting signal thread...\n";
     sig_reader.join();
-    timer.join();
-
-    provider->stop();
+    std::cerr << "record-audio: signal thread exited\n";
+    if (stop_requested.load(std::memory_order_acquire)) {
+        std::cerr << "record-audio: calling provider->stop()\n";
+        provider->stop();
+        std::cerr << "record-audio: provider->stop() returned\n";
+    }
+    std::cerr << "record-audio: waiting capture thread...\n";
+    capture.join();
+    std::cerr << "record-audio: capture thread exited\n";
 
     std::cerr << "已保存: " << out_path.string() << '\n';
     return 0;

@@ -88,11 +88,8 @@ private:
     
     std::list<queued_audio> queue_;
     std::mutex queue_mtx_;
-    std::condition_variable cv_;
+    std::condition_variable queue_cv_;
 
-    /** 仅在 produce_loop / stop() 间同步，便于 stop() 中对 snd_pcm_drop 打断 read */
-    std::mutex pcm_drop_mtx_;
-    void* pcm_for_drop_{nullptr};
 };
 
 }  // namespace piguard::capture_audio

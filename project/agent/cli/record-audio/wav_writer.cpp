@@ -1,10 +1,15 @@
 #include "wav_writer.hpp"
 
+#include "infra_log/logger.hpp"
+#include "infra_log/logger_factory.hpp"
+
 #include <cstring>
 
 namespace {
 
 constexpr unsigned kBitsPerSample = 16;
+const std::shared_ptr<piguard::infra_log::Logger> logger =
+    piguard::infra_log::LogFactory::getLogger("WavWriter");
 
 unsigned byte_rate_hz(unsigned channels, unsigned rate_hz) {
     return channels * rate_hz * (kBitsPerSample / 8u);
@@ -39,10 +44,12 @@ void WavWriter::steal(WavWriter&& other) noexcept {
 }
 
 bool WavWriter::open(const std::filesystem::path& path, unsigned channels, unsigned sample_rate_hz) {
+    logger->info("opening wav output: " + path.string());
     finalize();
 
     ofs_.open(path, std::ios::binary | std::ios::trunc | std::ios::out);
     if (!ofs_) {
+        logger->error("failed to open wav output: " + path.string());
         return false;
     }
     channels_ = channels;
@@ -51,6 +58,8 @@ bool WavWriter::open(const std::filesystem::path& path, unsigned channels, unsig
     finalized_ = false;
 
     write_placeholder_header();
+    logger->info("wav output opened, channels=" + std::to_string(channels_) +
+                 ", sample_rate=" + std::to_string(sample_rate_));
     return true;
 }
 
@@ -76,10 +85,14 @@ void WavWriter::write_placeholder_header() {
     put_le32(h + 40, 0);                           // pcm data chunk size placeholder
 
     ofs_.write(h, sizeof(h));
+    logger->debug("wav placeholder header written");
 }
 
 void WavWriter::write_pcm_s16le(const int16_t* interleaved_samples, std::size_t sample_count) {
     if (!ofs_ || finalized_ || sample_count == 0 || interleaved_samples == nullptr) {
+        if (sample_count > 0 && interleaved_samples != nullptr) {
+            logger->warn("skip writing pcm chunk because wav writer is not writable");
+        }
         return;
     }
     ofs_.write(reinterpret_cast<const char*>(interleaved_samples),
@@ -91,6 +104,7 @@ void WavWriter::finalize() noexcept {
     if (finalized_ || !ofs_.is_open()) {
         return;
     }
+    logger->info("finalizing wav, data_bytes=" + std::to_string(data_bytes_));
     ofs_.seekp(4, std::ios::beg);  // RIFF chunk size (bytes 4..7)
 
     uint32_t riff_chunksize =
@@ -107,4 +121,5 @@ void WavWriter::finalize() noexcept {
     ofs_.flush();
     ofs_.close();
     finalized_ = true;
+    logger->info("wav finalized and file closed");
 }
