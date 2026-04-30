@@ -54,23 +54,8 @@ void AudioCaptureProvider::stop() {
         logger->debug("stop called while already stopped");
         return;
     }
-    logger->info("stopping audio capture");
-
-    logger->info("notifying waiters after stop request");
-
-    // TODO: 不等待采集县城结束
-    // if (produce_thread_.joinable()) {
-    //     logger->info("waiting for capture thread to join");
-    //     produce_thread_.join();
-    //     logger->info("capture thread joined");
-    // }
-
-    {
-        std::lock_guard<std::mutex> lock(queue_mtx_);
-        queue_.clear();
-        queue_cv_.notify_all();
-    }
-    logger->info("audio capture stopped");
+    // stop 只负责发停止信号并唤醒等待者，避免在退出路径上做额外同步导致卡住
+    queue_cv_.notify_all();
 }
 
 AudioCaptureProvider::consumer_id_t AudioCaptureProvider::register_consumer() {

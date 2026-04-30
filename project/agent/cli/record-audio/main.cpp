@@ -1,27 +1,33 @@
 #include "capture_audio/audio_capture_provider.hpp"
+#include "infra_log/logger_factory.hpp"
+#include "infra_log/logger.hpp"
 #include "recording_consumer.hpp"
 
-#include <atomic>
 #include <cerrno>
+#include <csignal>
 #include <cstring>
-#include <fcntl.h>
 #include <filesystem>
-#include <iostream>
 #include <memory>
-#include <pthread.h>
-#include <signal.h>
 #include <string>
-#include <sys/signalfd.h>
 #include <thread>
 #include <unistd.h>
 
 namespace {
+const std::shared_ptr<piguard::infra_log::Logger> logger = 
+    piguard::infra_log::LogFactory::getLogger("RecordAudioCli");
 
 /** arecord -l: card 0 / device 6 — sof-hda-dsp DMIC */
 constexpr const char* kAlsaDevice = "plughw:0,6";
 constexpr const char* kOutFileName = ".tmp/record.wav";
 constexpr unsigned kSampleRateHz = 16000;
 constexpr unsigned kChannels = 1;
+volatile std::sig_atomic_t g_stop_requested = 0;
+
+void signal_handler(int signum) {
+    if (signum == SIGINT || signum == SIGTERM) {
+        g_stop_requested = 1;
+    }
+}
 
 }  // namespace
 
@@ -30,31 +36,21 @@ int main() {
     if (std::filesystem::exists(out_path)) {
         std::error_code ec;
         if (!std::filesystem::remove(out_path, ec) || ec) {
-            std::cerr << "record-audio: 无法删除已存在文件 " << out_path
-                      << ": " << ec.message() << '\n';
+            logger->error("unable to remove existing output file " + out_path.string() +
+                          ": " + ec.message());
             return 1;
         }
     }
 
-    sigset_t sigmask;
-    sigemptyset(&sigmask);
-    sigaddset(&sigmask, SIGINT);
-    sigaddset(&sigmask, SIGTERM);
-    if (pthread_sigmask(SIG_BLOCK, &sigmask, nullptr) != 0) {
-        std::cerr << "record-audio: pthread_sigmask 失败: " << std::strerror(errno) << '\n';
-        return 1;
-    }
-
-    const int sigfd = signalfd(-1, &sigmask, SFD_CLOEXEC);
-    if (sigfd < 0) {
-        std::cerr << "record-audio: signalfd 失败: " << std::strerror(errno) << '\n';
+    if (std::signal(SIGINT, signal_handler) == SIG_ERR ||
+        std::signal(SIGTERM, signal_handler) == SIG_ERR) {
+        logger->error("failed to register signal handler");
         return 1;
     }
 
     WavWriter wav;
     if (!wav.open(out_path, kChannels, kSampleRateHz)) {
-        std::cerr << "record-audio: 无法创建 " << out_path << '\n';
-        (void)close(sigfd);
+        logger->error("failed to create output wav: " + out_path.string());
         return 1;
     }
 
@@ -63,51 +59,27 @@ int main() {
 
     RecordingConsumer consumer(provider, "record-cli", std::move(wav));
 
-    std::atomic<bool> stop_requested{false};
-
-    auto request_stop = [&]() { stop_requested.store(true, std::memory_order_release); };
-
-    std::thread sig_reader([&]() {
-        for (;;) {
-            signalfd_siginfo si{};
-            const ssize_t n = ::read(sigfd, &si, sizeof(si));
-            if (n == static_cast<ssize_t>(sizeof(si))) {
-                std::cerr << "record-audio: signal received, requesting stop\n";
-                request_stop();
-                return;
-            }
-            if (n < 0 && (errno == EINTR || errno == EAGAIN)) {
-                continue;
-            }
-            return;
-        }
-    });
-
     if (!provider->start()) {
-        std::cerr << "record-audio: start 失败\n";
-        stop_requested.store(true, std::memory_order_release);
-        (void)close(sigfd);
-        sig_reader.join();
+        logger->error("provider start failed");
         return 1;
     }
 
     std::thread capture([&]() { consumer.run(); });
 
-    std::cerr << "录制中… 写入 " << out_path.string()
-              << "\nCtrl+C 结束（signalfd 阻塞等待，不写轮询）\n";
+    logger->info("recording started, output=" + out_path.string() +
+                 ", press Ctrl+C to stop (signal callback)");
 
-    std::cerr << "record-audio: waiting signal thread...\n";
-    sig_reader.join();
-    std::cerr << "record-audio: signal thread exited\n";
-    if (stop_requested.load(std::memory_order_acquire)) {
-        std::cerr << "record-audio: calling provider->stop()\n";
-        provider->stop();
-        std::cerr << "record-audio: provider->stop() returned\n";
+    logger->info("waiting stop signal");
+    while (!g_stop_requested) {
+        if (::pause() == -1 && errno == EINTR && g_stop_requested) {
+            break;
+        }
     }
-    std::cerr << "record-audio: waiting capture thread...\n";
-    capture.join();
-    std::cerr << "record-audio: capture thread exited\n";
 
-    std::cerr << "已保存: " << out_path.string() << '\n';
+    logger->info("waiting capture thread");
+    capture.join();
+    logger->info("capture thread exited");
+
+    logger->info("recording finished, saved to " + out_path.string());
     return 0;
 }

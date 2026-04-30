@@ -12,4 +12,5 @@ target_include_directories(record-audio
 target_link_libraries(record-audio
     PRIVATE
         pi_guard_audio_capture
+        pi_guard_infra_log
 )
