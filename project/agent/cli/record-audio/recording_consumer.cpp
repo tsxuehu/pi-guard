@@ -6,9 +6,12 @@ RecordingConsumer::RecordingConsumer(std::shared_ptr<piguard::capture_audio::Aud
     : piguard::capture_audio::AudioConsumerBase(std::move(provider), std::move(consumer_name)),
       writer_(std::move(writer)) {}
 
-void RecordingConsumer::process(const std::shared_ptr<piguard::capture_audio::audio_frame>& frame) {
-    if (!frame || frame->pcm_data.empty()) {
-        return;
+void RecordingConsumer::process(
+    const std::vector<std::shared_ptr<piguard::capture_audio::audio_frame>>& frames) {
+    for (const auto& frame : frames) {
+        if (!frame || frame->pcm_data.empty()) {
+            continue;
+        }
+        writer_.write_pcm_s16le(frame->pcm_data.data(), frame->pcm_data.size());
     }
-    writer_.write_pcm_s16le(frame->pcm_data.data(), frame->pcm_data.size());
 }

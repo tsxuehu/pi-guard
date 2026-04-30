@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace piguard::capture_audio {
 
@@ -50,6 +51,12 @@ public:
     void stop();
 
     /**
+     * @brief 等待采集线程退出
+     * @throws std::runtime_error 当不存在可等待的采集线程时抛出
+     */
+    void wait_producer_exit();
+
+    /**
      * 注册消费者 ID
      */
     consumer_id_t register_consumer();
@@ -60,18 +67,15 @@ public:
     void unregister_consumer(consumer_id_t id);
     
     /**
-     * @brief 等待并获取最新可用的音频帧
+     * @brief 等待并获取所有满足条件的音频帧
      * @param id 消费者 ID
      * @param last_seq 上次处理的序号
-     * @return 匹配的音频帧指针，若停止则返回 nullptr
+     * @return 匹配的音频帧列表，若停止或无可用帧则返回空列表
      */
-    std::shared_ptr<audio_frame> wait_audio(consumer_id_t id, uint64_t last_seq);
+    std::vector<std::shared_ptr<audio_frame>> wait_audio(consumer_id_t id, uint64_t last_seq);
 
 private:
     void produce_loop();
-    
-    // 内部查找逻辑（需在持有锁的情况下调用）
-    std::list<queued_audio>::iterator find_latest_frame_locked(consumer_id_t id, uint64_t last_seq);
 
 private:
     std::string device_;

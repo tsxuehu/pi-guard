@@ -6,6 +6,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace piguard::capture_audio {
     namespace {
@@ -13,7 +14,7 @@ namespace piguard::capture_audio {
     }
 
 /**
- * 与采集线程同频消费：生产者每 enqueue 一包，consumer 即从 wait_audio 取到并 process。
+ * 与采集线程同频消费：生产者每 enqueue 一包，consumer 从 wait_audio 批量取帧并 process。
  */
 class AudioConsumerBase {
 public:
@@ -31,14 +32,20 @@ public:
     }
 
     void run() {
+        bool first_frame_logged = false;
         while (running_) {
-            auto frame = provider_->wait_audio(consumer_id_, last_seq_);
-            if (!frame) {
+            auto frames = provider_->wait_audio(consumer_id_, last_seq_);
+            if (frames.empty()) {
                 break;
             }
 
-            process(frame);
-            last_seq_ = frame->seq;
+            if (!first_frame_logged) {
+                logger->info("consumer '" + name_ + "' received first frame, seq=" +
+                             std::to_string(frames.front()->seq));
+                first_frame_logged = true;
+            }
+            process(frames);
+            last_seq_ = frames.back()->seq;
         }
     }
 
@@ -47,7 +54,7 @@ public:
     /** 仅在构造时给定，生命周期内不变的消费者标识（如线程名 / 日志 tag） */
     const std::string& name() const { return name_; }
 
-    virtual void process(const std::shared_ptr<audio_frame>& frame) = 0;
+    virtual void process(const std::vector<std::shared_ptr<audio_frame>>& frames) = 0;
 
 protected:
     std::shared_ptr<AudioCaptureProvider> provider_;

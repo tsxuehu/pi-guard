@@ -58,6 +58,13 @@ void AudioCaptureProvider::stop() {
     queue_cv_.notify_all();
 }
 
+void AudioCaptureProvider::wait_producer_exit() {
+    if (!produce_thread_.joinable()) {
+        throw std::runtime_error("AudioCaptureProvider: produce_thread is not joinable");
+    }
+    produce_thread_.join();
+}
+
 AudioCaptureProvider::consumer_id_t AudioCaptureProvider::register_consumer() {
     std::lock_guard<std::mutex> lock(queue_mtx_);
     consumer_id_t id = next_consumer_id_++;
@@ -81,29 +88,42 @@ void AudioCaptureProvider::unregister_consumer(consumer_id_t id) {
     }
 }
 
-std::shared_ptr<audio_frame> AudioCaptureProvider::wait_audio(consumer_id_t id, uint64_t last_seq) {
+std::vector<std::shared_ptr<audio_frame>> AudioCaptureProvider::wait_audio(consumer_id_t id, uint64_t last_seq) {
     std::unique_lock<std::mutex> lock(queue_mtx_);
 
     queue_cv_.wait(lock, [this, id, last_seq] {
-        return !running_.load(std::memory_order_acquire) ||
-               find_latest_frame_locked(id, last_seq) != queue_.end();
+        if (!running_.load(std::memory_order_acquire)) {
+            return true;
+        }
+        for (const auto& item : queue_) {
+            if (item.frame->seq > last_seq && item.pending_consumers.count(id) > 0) {
+                return true;
+            }
+        }
+        return false;
     });
 
-    if (!running_.load(std::memory_order_acquire)) {
-        return nullptr;
+    if (!running_.load(std::memory_order_acquire) ||
+        queue_.empty() ||
+        active_consumers_.count(id) == 0) {
+        return {};
     }
 
-    auto it = find_latest_frame_locked(id, last_seq);
-    if (it == queue_.end()) {
-        return nullptr;
+    std::vector<std::shared_ptr<audio_frame>> matched_frames;
+    for (const auto& item : queue_) {
+        if (item.frame->seq > last_seq && item.pending_consumers.count(id) > 0) {
+            matched_frames.push_back(item.frame);
+        }
+    }
+    if (matched_frames.empty()) {
+        return {};
     }
 
-    auto target_frame = it->frame;
-
-    // 自动清理：标记该消费者已处理当前及之前的所有帧
-    auto current = queue_.begin();
-    while (current != std::next(it)) {
-        current->pending_consumers.erase(id);
+    // 将当前命中的所有帧标记为该消费者已处理，保留其余消费者状态。
+    for (auto current = queue_.begin(); current != queue_.end(); ) {
+        if (current->frame->seq > last_seq && current->pending_consumers.count(id) > 0) {
+            current->pending_consumers.erase(id);
+        }
         if (current->pending_consumers.empty()) {
             current = queue_.erase(current);
         } else {
@@ -111,7 +131,7 @@ std::shared_ptr<audio_frame> AudioCaptureProvider::wait_audio(consumer_id_t id, 
         }
     }
 
-    return target_frame;
+    return matched_frames;
 }
 
 void AudioCaptureProvider::produce_loop() {
@@ -207,16 +227,6 @@ void AudioCaptureProvider::produce_loop() {
 
     (void)snd_pcm_close(handle);
     logger->info("audio capture loop exited and pcm closed");
-}
-
-std::list<AudioCaptureProvider::queued_audio>::iterator 
-AudioCaptureProvider::find_latest_frame_locked(consumer_id_t id, uint64_t last_seq) {
-    for (auto it = queue_.rbegin(); it != queue_.rend(); ++it) {
-        if (it->frame->seq > last_seq && it->pending_consumers.count(id)) {
-            return std::prev(it.base()); 
-        }
-    }
-    return queue_.end();
 }
 
 }  // namespace piguard::capture_audio
