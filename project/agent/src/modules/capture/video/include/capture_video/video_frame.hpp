@@ -5,6 +5,8 @@
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
 
+namespace piguard::capture_video {
+
 struct VideoFrame {
     uint64_t seq;           // 全局序列号
     void* data;             // 内存映射地址
@@ -14,3 +16,5 @@ struct VideoFrame {
     // 当该帧在分发器队列和所有消费者线程中都被释放时，自动执行 QBUF
     std::shared_ptr<void> v4l2_ref;
 };
+
+}  // namespace piguard::capture_video

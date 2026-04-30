@@ -1,7 +1,7 @@
 #include "capture_audio/audio_capture_module.hpp"
 
 
-namespace piguard::capture {
+namespace piguard::capture_audio {
 
 AudioCapture::AudioCapture(foundation::ThreadSafeQueue<foundation::AudioFrame>& out_queue) : out_queue_(out_queue) {}
 
@@ -15,4 +15,4 @@ bool AudioCapture::start() {
 void AudioCapture::stop() { }
 
 
-}  // namespace piguard::capture
+}  // namespace piguard::capture_audio

@@ -21,6 +21,8 @@ int xioctl(int fd, unsigned long request, void* arg) {
 }
 }  // namespace
 
+namespace piguard::capture_video {
+
 VideoCaptureProvider::VideoCaptureProvider(
     std::string device, int capture_fps, int capture_width, int capture_height, size_t max_capacity)
     : device_(std::move(device)),
@@ -289,3 +291,5 @@ std::shared_ptr<VideoFrame> VideoCaptureProvider::wait_frame(consumer_id_t consu
     prune_finished_frames_locked();
     return out;
 }
+
+}  // namespace piguard::capture_video

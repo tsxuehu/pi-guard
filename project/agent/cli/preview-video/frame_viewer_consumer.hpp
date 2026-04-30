@@ -5,15 +5,15 @@
 
 #include "capture_video/consumer_base.hpp"
 
-class FrameViewerConsumer : public ConsumerBase {
+class FrameViewerConsumer : public piguard::capture_video::ConsumerBase {
 public:
-    FrameViewerConsumer(std::shared_ptr<VideoCaptureProvider> provider,
+    FrameViewerConsumer(std::shared_ptr<piguard::capture_video::VideoCaptureProvider> provider,
                         int target_fps,
                         std::string consumer_name,
                         int width,
                         int height);
 
-    void process(const std::shared_ptr<VideoFrame>& frame) override;
+    void process(const std::shared_ptr<piguard::capture_video::VideoFrame>& frame) override;
 
 private:
     int width_{0};

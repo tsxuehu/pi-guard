@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
     const std::string device = (argc > 1) ? argv[1] : "/dev/video0";
 
     try {
-        auto provider = std::make_shared<VideoCaptureProvider>(
+        auto provider = std::make_shared<piguard::capture_video::VideoCaptureProvider>(
             device, kCaptureFps, kWidth, kHeight, kProviderQueueCapacity);
         provider->start();
 

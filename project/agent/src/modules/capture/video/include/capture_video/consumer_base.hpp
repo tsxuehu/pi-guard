@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <string>
 
+namespace piguard::capture_video {
+
 class ConsumerBase {
 public:
     ConsumerBase(std::shared_ptr<VideoCaptureProvider> provider, int target_fps, std::string consumer_name)
@@ -69,3 +71,5 @@ protected:
     uint64_t last_seq_{0};
     std::atomic<bool> running_{true};
 };
+
+}  // namespace piguard::capture_video

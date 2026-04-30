@@ -11,6 +11,8 @@
 #include <string>
 #include <thread>
 
+namespace piguard::capture_audio {
+
 /**
  * @brief 音频捕获提供者
  * 采用单生产者-多消费者模型，参考视频捕获模块实现。
@@ -39,21 +41,21 @@ public:
     AudioCaptureProvider(const AudioCaptureProvider&) = delete;
     AudioCaptureProvider& operator=(const AudioCaptureProvider&) = delete;
 
-    /** 启动 ALSA 采集线程（采样率 / 声道数已由构造传入） */
+    /** 启动 ALSA 采集线程 */
     bool start();
 
     /**
-     * @brief 停止采集并清理资源
+     * 停止采集并清理资源
      */
     void stop();
 
     /**
-     * @brief 注册消费者 ID
+     * 注册消费者 ID
      */
     consumer_id_t register_consumer();
 
     /**
-     * @brief 注销消费者，并清理其在队列中的状态
+     * 注销消费者，并清理其在队列中的状态
      */
     void unregister_consumer(consumer_id_t id);
     
@@ -92,3 +94,5 @@ private:
     std::mutex pcm_drop_mtx_;
     void* pcm_for_drop_{nullptr};
 };
+
+}  // namespace piguard::capture_audio

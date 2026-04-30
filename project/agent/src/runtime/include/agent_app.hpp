@@ -53,7 +53,7 @@ private:
     infra::EventBus event_bus_;
 
     capture_video::VideoCaptureModule video_capture_;
-    capture::AudioCapture audio_capture_;
+    capture_audio::AudioCapture audio_capture_;
 
     processing::MotionDetect motion_detect_;
     processing::Encoder encoder_;

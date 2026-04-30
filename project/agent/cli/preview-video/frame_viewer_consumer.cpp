@@ -4,16 +4,16 @@
 
 #include <opencv2/highgui.hpp>
 
-FrameViewerConsumer::FrameViewerConsumer(std::shared_ptr<VideoCaptureProvider> provider,
+FrameViewerConsumer::FrameViewerConsumer(std::shared_ptr<piguard::capture_video::VideoCaptureProvider> provider,
                                            int target_fps,
                                            std::string consumer_name,
                                            int width,
                                            int height)
-    : ConsumerBase(std::move(provider), target_fps, std::move(consumer_name)),
+    : piguard::capture_video::ConsumerBase(std::move(provider), target_fps, std::move(consumer_name)),
       width_(width),
       height_(height) {}
 
-void FrameViewerConsumer::process(const std::shared_ptr<VideoFrame>& frame) {
+void FrameViewerConsumer::process(const std::shared_ptr<piguard::capture_video::VideoFrame>& frame) {
     if (frame->data == nullptr || frame->length < static_cast<size_t>(width_ * height_ * 2)) {
         return;
     }

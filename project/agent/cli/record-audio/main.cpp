@@ -54,7 +54,7 @@ int main() {
         return 1;
     }
 
-    auto provider = std::make_shared<AudioCaptureProvider>(
+    auto provider = std::make_shared<piguard::capture_audio::AudioCaptureProvider>(
         std::string(kAlsaDevice), kSampleRateHz, kChannels);
 
     RecordingConsumer consumer(provider, "record-cli", std::move(wav));

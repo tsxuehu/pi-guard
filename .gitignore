@@ -31,6 +31,7 @@ project/server/dist/
 *.tsbuildinfo
 
 # C/C++ / CMake（相对仓库根）
+/build/
 project/agent/.cache/
 project/agent/build/
 project/agent/build-agent/

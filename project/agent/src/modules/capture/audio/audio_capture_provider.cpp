@@ -1,11 +1,19 @@
 #include "capture_audio/audio_capture_provider.hpp"
 
+#include "infra_log/logger_factory.hpp"
+#include "infra_log/logger.hpp"
+
 #include <alsa/asoundlib.h>
 
 #include <chrono>
 #include <stdexcept>
 #include <string>
 #include <utility>
+
+namespace piguard::capture_audio {
+    namespace {
+        const std::shared_ptr<infra_log::Logger> logger = infra_log::LogFactory::getLogger("VideoCaptureModule");
+    }
 
 AudioCaptureProvider::AudioCaptureProvider(std::string device,
                                            unsigned int sample_rate_hz,
@@ -136,8 +144,6 @@ void AudioCaptureProvider::produce_loop() {
                        1,      
                        50000); 
 
-    (void)snd_pcm_nonblock(handle, 1);
-
     {
         std::lock_guard<std::mutex> pcm_lk(pcm_drop_mtx_);
         pcm_for_drop_ = handle;
@@ -155,7 +161,8 @@ void AudioCaptureProvider::produce_loop() {
             continue;
         }
         if (frames == -EAGAIN) {
-            (void)snd_pcm_wait(handle, 20);
+            // 阻塞模式下通常不应出现，短暂退让后重试
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
         if (frames < 0) {
@@ -195,3 +202,5 @@ AudioCaptureProvider::find_latest_frame_locked(consumer_id_t id, uint64_t last_s
     }
     return queue_.end();
 }
+
+}  // namespace piguard::capture_audio

@@ -5,6 +5,8 @@
 #include <memory>
 #include <string>
 
+namespace piguard::capture_audio {
+
 /**
  * 与采集线程同频消费：生产者每 enqueue 一包，consumer 即从 wait_audio 取到并 process。
  */
@@ -49,3 +51,5 @@ protected:
     uint64_t last_seq_{0};
     std::atomic<bool> running_{true};
 };
+
+}  // namespace piguard::capture_audio

@@ -1,12 +1,12 @@
 #include "recording_consumer.hpp"
 
-RecordingConsumer::RecordingConsumer(std::shared_ptr<AudioCaptureProvider> provider,
+RecordingConsumer::RecordingConsumer(std::shared_ptr<piguard::capture_audio::AudioCaptureProvider> provider,
                                      std::string consumer_name,
                                      WavWriter writer)
-    : AudioConsumerBase(std::move(provider), std::move(consumer_name)),
+    : piguard::capture_audio::AudioConsumerBase(std::move(provider), std::move(consumer_name)),
       writer_(std::move(writer)) {}
 
-void RecordingConsumer::process(const std::shared_ptr<audio_frame>& frame) {
+void RecordingConsumer::process(const std::shared_ptr<piguard::capture_audio::audio_frame>& frame) {
     if (!frame || frame->pcm_data.empty()) {
         return;
     }

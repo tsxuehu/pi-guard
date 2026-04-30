@@ -6,7 +6,7 @@
 #include "foundation/thread_safe_queue.hpp"
 #include "foundation/types.hpp"
 
-namespace piguard::capture {
+namespace piguard::capture_audio {
 
 class AudioCapture : public foundation::Module {
 public:
@@ -20,4 +20,4 @@ private:
     foundation::ThreadSafeQueue<foundation::AudioFrame>& out_queue_;
 };
 
-}  // namespace piguard::capture
+}  // namespace piguard::capture_audio

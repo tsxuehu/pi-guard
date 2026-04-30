@@ -11,6 +11,8 @@
 #include <unordered_set>
 #include <vector>
 
+namespace piguard::capture_video {
+
 class VideoCaptureProvider {
 public:
     using consumer_id_t = uint64_t;
@@ -93,3 +95,5 @@ private:
     std::condition_variable cv_;           // 帧到达/停止时唤醒等待中的消费者
     std::thread cap_thread_;               // 后台采集线程（DQBUF -> 入队 -> 通知）
 };
+
+}  // namespace piguard::capture_video
