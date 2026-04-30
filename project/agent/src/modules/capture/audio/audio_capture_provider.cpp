@@ -3,15 +3,26 @@
 #include <alsa/asoundlib.h>
 
 #include <chrono>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
 AudioCaptureProvider::AudioCaptureProvider(std::string device,
                                            unsigned int sample_rate_hz,
-                                           unsigned int channels)
-    : device_(std::move(device)),
-      sample_rate_(sample_rate_hz),
-      channels_(channels) {}
+                                           unsigned int channels) {
+    if (device.empty()) {
+        throw std::invalid_argument("AudioCaptureProvider: device must be non-empty");
+    }
+    if (sample_rate_hz == 0) {
+        throw std::invalid_argument("AudioCaptureProvider: sample_rate_hz must be > 0");
+    }
+    if (channels == 0) {
+        throw std::invalid_argument("AudioCaptureProvider: channels must be >= 1");
+    }
+    device_ = std::move(device);
+    sample_rate_ = sample_rate_hz;
+    channels_ = channels;
+}
 
 AudioCaptureProvider::~AudioCaptureProvider() {
     stop();

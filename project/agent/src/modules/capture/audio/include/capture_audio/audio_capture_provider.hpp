@@ -25,13 +25,13 @@ public:
     };
 
     /**
+     * 须显式传入三项参数（无默认值）。非法参数抛出 std::invalid_argument。
+     *
      * @param device ALSA PCM 名称，如 default、plughw:0,7
-     * @param sample_rate_hz 采样率（与 snd_pcm_set_params / 单次 read 的 20ms 片长一致推导）
-     * @param channels 通道数（1 为单声道）
+     * @param sample_rate_hz 采样率（与 snd_pcm_set_params / 单次 read 的 ~20ms 片长推导）
+     * @param channels 声道数（须 >= 1）
      */
-    explicit AudioCaptureProvider(std::string device = "default",
-                                  unsigned int sample_rate_hz = 16000,
-                                  unsigned int channels = 1);
+    explicit AudioCaptureProvider(std::string device, unsigned int sample_rate_hz, unsigned int channels);
 
     ~AudioCaptureProvider();
 

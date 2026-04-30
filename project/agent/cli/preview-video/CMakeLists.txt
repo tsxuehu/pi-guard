@@ -1,7 +1,7 @@
 find_package(OpenCV REQUIRED COMPONENTS core highgui imgproc)
 
 add_executable(preview-video
-    view_video.cpp
+    main.cpp
     frame_converter.cpp
     frame_viewer_consumer.cpp
 )

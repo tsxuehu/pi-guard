@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
 
         provider->stop();
     } catch (const std::exception& ex) {
-        std::cerr << "view_video error: " << ex.what() << std::endl;
+        std::cerr << "preview-video error: " << ex.what() << std::endl;
         return 1;
     }
 

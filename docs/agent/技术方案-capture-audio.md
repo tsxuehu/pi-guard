@@ -16,8 +16,8 @@
 
 主要由 `AudioCaptureProvider` 提供对外能力：
 
-- **构造 `AudioCaptureProvider(std::string device, unsigned int sample_rate_hz = 16000, unsigned int channels = 1)`**  
-  指定 ALSA 设备名（如 `"default"`、`"plughw:0,7"`）、采样率、声道数。后续 `produce_loop()` 中 `snd_pcm_set_params` 与单次读取的帧数均由这些参数推导。
+- **构造 `AudioCaptureProvider(std::string device, unsigned int sample_rate_hz, unsigned int channels)`**（无默认参数）  
+  指定 ALSA 设备名（如 `"default"`、`"plughw:0,7"`）、采样率（须 `> 0`）、声道数（须 `>= 1`）。设备名为空或不满足上述约束时抛出 `std::invalid_argument`。后续 `produce_loop()` 中 `snd_pcm_set_params` 与单次读取的帧数均由这些参数推导。
 
 - `bool start()`  
   启动采集线程（重复调用语义与实现一致：已通过 `exchange` 避免二次启动语义混乱；业务上建议只调用一次）。
@@ -107,6 +107,20 @@
 | `seq` | 全局递增序号，用于消费者 `last_seq` 推进与选包。 |
 | `pcm_data` | S16_LE 交织样本；长度为 `frames * channels`（与本次 `read` 实际帧数一致）。 |
 | `timestamp` | 采集时刻的 `steady_clock` 时间戳计数值（单位与 `count()` 一致，业务若要对齐视频时间线需自行约定换算）。 |
+
+**`audio_frame` 自身不携带声道数**；声道数与构造 `AudioCaptureProvider` 时传入的 `channels` 一致，消费端需与 Provider 约定对齐（例如单写死为 1 声道，或上层配置与 WAV/编码器元数据一致）。
+
+### 5.1 PCM 数据存放（格式与多声道交织）
+
+- **样本类型**：固定为 **有符号 16 位小端**（`S16_LE`），与 ALSA `SND_PCM_FORMAT_S16_LE` 一致。  
+- **内存布局**：`pcm_data` 为 **一维** `std::vector<int16_t>`，采用 **`SND_PCM_ACCESS_RW_INTERLEAVED`（交织访问）**，即 ALSA 单次 `snd_pcm_readi` 返回缓冲区在内存中的自然顺序，**未做按声道拆平面**（无独立的 L/R 缓冲区）。  
+- **「帧」（frame）语义**：在 ALSA 中表示**同一时刻全部声道各一个采样**；`snd_pcm_readi` 的第三个参数 **`frame_size`** 是**帧数**，单次成功读取后用户态有效元素个数为 **`frames * channels`**（`frames` 为本次返回值，可能小于请求的 `frame_size`）。  
+- **多声道下标标系**（以立体声 `channels = 2` 为例）：线性下标与时间的对应关系为  
+  `[0]=ch0_t0, [1]=ch1_t0, [2]=ch0_t1, [3]=ch1_t1, …`。一般声卡上 **ch0/ch1 对应左/右声道**（仍以设备/驱动为准）。  
+- **单声道**：等价于仅按时间排列的 `int16_t` 序列，长度为 `frames * 1`。  
+- **写文件**：标准 WAV 对多声道 PCM 同样要求 **交织**，本仓库 `record-audio` 在头里写入的 `channels`、`sample_rate` 与上述 `pcm_data` 布局一致即可被常见播放器正确解码。
+
+### 5.2 包从队列消失或被丢弃
 
 包会在以下场景从队列消失或被丢弃：
 
