@@ -51,12 +51,6 @@ public:
     void stop();
 
     /**
-     * @brief 等待采集线程退出
-     * @throws std::runtime_error 当不存在可等待的采集线程时抛出
-     */
-    void wait_producer_exit();
-
-    /**
      * 注册消费者 ID
      */
     consumer_id_t register_consumer();

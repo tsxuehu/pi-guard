@@ -67,7 +67,6 @@ int main() {
 
     logger->info("signal received, calling provider stop");
     provider->stop();
-    provider->wait_producer_exit();
     logger->info("provider exit");
 
     logger->info("waiting capture thread");

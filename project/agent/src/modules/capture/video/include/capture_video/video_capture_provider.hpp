@@ -92,7 +92,7 @@ private:
     std::unordered_set<consumer_id_t> consumers_; // 当前已注册消费者集合
     std::deque<queued_frame> queue_;       // 帧分发队列；每帧记录待消费的消费者集合
     std::mutex mtx_;                       // 保护消费者集合与队列等共享状态
-    std::condition_variable cv_;           // 帧到达/停止时唤醒等待中的消费者
+    std::condition_variable queue_cv_;     // 帧到达/停止时唤醒等待中的消费者
     std::thread cap_thread_;               // 后台采集线程（DQBUF -> 入队 -> 通知）
 };
 

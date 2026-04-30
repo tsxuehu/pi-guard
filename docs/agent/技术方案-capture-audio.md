@@ -1,137 +1,138 @@
-# 音频捕获模块技术说明
+# 音频捕获技术方案
 
-## 1. 模块功能
 
-音频捕获模块用于通过 **ALSA** 从麦克风等采集设备持续读取 PCM，并将数据以固定时间片分包后，分发给多个消费者线程。与视频捕获模块同属「单生产者、多消费者」模型，模块目标如下：
+## 1. 模块定位
 
-- 支持单生产者、多消费者并发访问。
-- 消费者可与采集节拍对齐：生产者每 enqueue 一包，消费者即通过 `wait_audio` 可取到并重放处理（或由 `wait_audio` 自动跳到队列中对该消费者可用的最新一包）。
-- 同一包可被多个消费者各自独立消费（各自的 `consumer_id`、`last_seq` 独立）。
-- 队列有容量上限（`max_queue_capacity_`，当前约可容纳约 1 秒分包），超限时丢弃最老包，压低延迟。
-- PCM 拷贝进 `audio_frame::pcm_data`，不依赖 mmap 环形缓冲回收；队列与 `shared_ptr` 生命周期决定何时释放内存。
+音频捕获模块通过 ALSA 持续采集 PCM（`S16_LE`、交织布局），采用**单生产者 + 多消费者**模型：
 
-源码主要路径：`project/agent/src/modules/capture/audio/`，帧类型见 `include/capture_audio/audio_frame.hpp`，分发器见 `audio_capture_provider.hpp`。
+- 生产者线程：`AudioCaptureProvider::produce_loop()`
+- 分发队列：`std::list<queued_audio>`
+- 消费者：继承 `AudioConsumerBase`，通过 `wait_audio()` 批量获取待处理帧
 
-## 2. 对外接口
+## 2. 对外接口与语义
 
-主要由 `AudioCaptureProvider` 提供对外能力：
+### 2.1 `AudioCaptureProvider`
 
-- **构造 `AudioCaptureProvider(std::string device, unsigned int sample_rate_hz, unsigned int channels)`**（无默认参数）  
-  指定 ALSA 设备名（如 `"default"`、`"plughw:0,7"`）、采样率（须 `> 0`）、声道数（须 `>= 1`）。设备名为空或不满足上述约束时抛出 `std::invalid_argument`。后续 `produce_loop()` 中 `snd_pcm_set_params` 与单次读取的帧数均由这些参数推导。
+- `AudioCaptureProvider(std::string device, unsigned sample_rate_hz, unsigned channels)`
+  - `device` 不能为空
+  - `sample_rate_hz` 必须 `> 0`
+  - `channels` 必须 `>= 1`
+  - 参数非法时抛 `std::invalid_argument`
 
-- `bool start()`  
-  启动采集线程（重复调用语义与实现一致：已通过 `exchange` 避免二次启动语义混乱；业务上建议只调用一次）。
+- `bool start()`
+  - 通过 `running_.exchange(true)` 防止重复启动
+  - 首次调用会创建采集线程并返回 `true`
+  - 已运行时直接返回 `true`
 
-- `void stop()`  
-  停止线程、`join`、`clear` 内部分发包队列并 `notify_all`。
+- `void stop()`
+  - 将 `running_` 置 `false` 并 `notify_all`
+  - 若采集线程可 `join`，在 `stop()` 内部直接等待线程退出
+  - 不清空分发队列（队列由消费/回收逻辑自然清理）
 
-- `consumer_id_t register_consumer()`  
-  注册消费者，返回 ID（从 0 递增），新入队的包会将当前活跃消费者集写入对应 `pending_consumers`。
+- `consumer_id_t register_consumer()`
+  - 返回从 `0` 递增的消费者 ID
+  - 将 ID 加入 `active_consumers_`
 
-- `void unregister_consumer(consumer_id_t id)`  
-  将该 ID 从活跃集合与各队列元素的 `pending_consumers` 中移除；若某元素 `pending_consumers` 为空则从队列摘除。
+- `void unregister_consumer(consumer_id_t id)`
+  - 从活跃集合移除
+  - 清理该 ID 在队列各节点的 `pending_consumers`
+  - 对 `pending_consumers` 为空的节点立即回收
 
-- `std::shared_ptr<audio_frame> wait_audio(consumer_id_t id, uint64_t last_seq)`  
-  阻塞直到有可用的、对该消费者尚未处理且 `seq > last_seq` 的包；为降低延迟，选取**当前队列中对该消费者可用的最新一包**返回，并将该消费者在该包之前所有包上等价为「跳过」并从队列中摘除（已无待处理消费者的元素）。
+- `std::vector<std::shared_ptr<audio_frame>> wait_audio(consumer_id_t id, uint64_t last_seq)`
+  - 阻塞等待满足条件的帧：`seq > last_seq` 且该帧仍待该消费者处理
+  - 返回**所有命中的帧列表**（按队列顺序）
+  - 返回后会把这些帧上的该消费者标记为“已处理”，并回收无人待处理节点
+  - 以下情况返回空列表：`running_ == false`、队列空、消费者已失效、或无匹配帧
 
-消费者基类 `AudioConsumerBase`（`capture_audio/consumer_base.hpp`）约定：
+### 2.2 `AudioConsumerBase`
 
-- 构造时传入 `provider` 与固定用途的 **消费者名称**（`std::string`，日志等用），内部自动 `register_consumer()`；
-- `run()` 中循环：`wait_audio` → `process(frame)` → 更新 `last_seq_`，与生产者分包频率一致地完成消费；
-- 析构时 `unregister_consumer`。
+- 构造时自动 `register_consumer()`
+- `run()` 循环：
+  - 调 `wait_audio(consumer_id_, last_seq_)`
+  - 若返回空列表则退出
+  - 调派生类 `process(frames)`
+  - `last_seq_ = frames.back()->seq`
+- 析构时自动 `unregister_consumer()`
 
-构建依赖中与 ALSA 相关的系统包见仓库内 `docs/agent/构建.pd`（如 `libasound2-dev`）。
+## 3. 采集线程（ALSA）流程
 
-## 3. ALSA 设备操作流程
+`produce_loop()` 主流程如下：
 
-底层实现在 `AudioCaptureProvider::produce_loop()` 中完成；业务侧一般只需 **构造传入设备名与格式** → **`start()`** → **`register_consumer()` + `wait_audio()`** → **`stop()`**。与代码一致的主要步骤如下。
+1. `snd_pcm_open(..., SND_PCM_STREAM_CAPTURE, 0)` 打开设备  
+   失败则记录日志，`running_ = false` 并唤醒等待者后退出。
 
-### 3.1 打开设备
+2. `snd_pcm_set_params(...)` 配置：
+   - 格式：`SND_PCM_FORMAT_S16_LE`
+   - 访问：`SND_PCM_ACCESS_RW_INTERLEAVED`
+   - 声道：`channels_`
+   - 采样率：`sample_rate_`
+   - 允许重采样：`1`
+   - 目标延迟：`50000` 微秒
 
-- `start()` 将 `running_` 置为真并启动线程后，线程内调用 `snd_pcm_open(&handle, device_.c_str(), SND_PCM_STREAM_CAPTURE, 0)`。  
-- 打开失败：`running_ = false`，线程直接返回（等待端可通过 `wait_audio` 与 `running_` 结合观察结束）。
+3. 尝试开启非阻塞：`snd_pcm_nonblock(handle, 1)`（失败仅告警，不中断）
 
-### 3.2 配置与参数
+4. 计算单次读取帧数（约 20ms）：
+   - `frame_size = sample_rate_ * 20 / 1000`（防御性兜底为 `320`）
 
-- 使用 `snd_pcm_set_params` 配置为：  
-  - 格式：`SND_PCM_FORMAT_S16_LE`  
-  - 访问：`SND_PCM_ACCESS_RW_INTERLEAVED`（交织多声道）  
-  - 声道数、采样率：来自构造参数 `channels_`、`sample_rate_`  
-  - 其余参数与实现中软重采样标志、期望延迟（如 `50000` 微秒档）与官方 API 约定一致，以源码为准。
+5. 循环读音频：
+   - `snd_pcm_readi(handle, buffer.data(), frame_size)`
+   - `-EPIPE`：`snd_pcm_prepare(handle)` 后继续
+   - `-EAGAIN`：sleep 5ms 后继续（便于及时响应 stop）
+   - 其他负值：记录错误，sleep 1ms 后继续
+   - 正常读到 `frames > 0`：
+     - 构造 `audio_frame`
+     - `seq = next_seq_++`
+     - `pcm_data` 拷贝 `frames * channels_` 个 `int16_t`
+     - `timestamp = steady_clock::now().time_since_epoch().count()`
+     - 入队并唤醒等待者
 
-### 3.3 读取与封装为 `audio_frame`
+6. 队列容量控制：
+   - `max_queue_capacity_ = 50`
+   - 超限后 `pop_front()` 丢弃最旧节点
 
-- **单次读取帧数（约 20ms）**  
-  `frame_size = sample_rate_ * 20 / 1000`（若 `sample_rate_` 异常回退为 320，与历史 16kHz/20ms 兼容）。  
-- 循环 `snd_pcm_readi(handle, buffer.data(), frame_size)`：  
-  - `-EPIPE`：`snd_pcm_prepare` 后重试；  
-  - 其他负值：短暂 `sleep` 后重试；  
-  - 成功：将 `frames * channels_` 个 `int16_t` 拷入 `audio_frame::pcm_data`，填写递增 `seq` 与 `timestamp`（`steady_clock` 的 `time_since_epoch().count()`），再入队并 `notify_all`。
+7. 退出循环后关闭 PCM：`snd_pcm_close(handle)`
 
-### 3.4 关闭设备
+## 4. 队列与多消费者分发机制
 
-- `produce_loop` 在 `running_` 为假退出循环后执行 `snd_pcm_close(handle)`。  
-- `stop()` 侧将 `running_` 置假、`join` 线程，并在持锁下 `queue_.clear()`，唤醒所有 `wait_audio` 等待者。
+队列节点 `queued_audio` 包含：
 
-## 4. 实现原理
+- `frame: shared_ptr<audio_frame>`
+- `pending_consumers: set<consumer_id_t>`（还没处理该帧的消费者）
 
-### 4.1 生产模型
+新帧入队时，`pending_consumers` 直接复制当前 `active_consumers_` 快照。  
+因此同一帧可被多个消费者独立消费，且消费进度互不覆盖。
 
-- 单采集线程在 `produce_loop()` 中阻塞/重试式 `read`，每读满一片即分配一个 `audio_frame`（`shared_ptr`），PCM 已复制到 `std::vector<int16_t>`。  
-- 每包带全局递增 `seq`。  
-- 队列为 `std::list<queued_audio>`，元素包含 `frame` 与 `pending_consumers`（`std::set<consumer_id_t>`）。新包入队时 `pending_consumers` 初始为当前 `active_consumers_` 快照。  
-- 若 `queue_.size() > max_queue_capacity_`，`pop_front()` 丢弃最老包（与视频侧「有界队列丢旧」一致）。
+`wait_audio()` 的消费语义是“**批量拉取并批量确认**”：
 
-### 4.2 多消费者模型
+- 拉取：把当前队列内对该消费者“`seq > last_seq` 且待处理”的帧全部收集返回
+- 确认：通过 `cleanup_consumer_pending_locked(id, last_seq, false)` 将这些匹配帧上的该消费者状态移除
+- 回收：任何 `pending_consumers` 变空的节点都会被立即 `erase`
 
-与视频模块思想一致：每个消费者维护自己的 `last_seq`，调用 `wait_audio(id, last_seq)` 时：
+## 5. 线程生命周期约定
 
-1. 条件变量等待「存在 `seq > last_seq` 且该 `id` 仍在该元素 `pending_consumers` 中」的包；  
-2. 从队列**从后向前**查找满足条件的**最新**一包（`find_latest_frame_locked`）；  
-3. 从队头到该包之前，将该 `id` 从各元素 `pending_consumers` 中擦除；若某元素无任何待处理消费者则 `erase` 该元素；  
-4. 返回选中包的 `shared_ptr`。
+当前实现由 `stop()` 统一完成停机：
 
-因此：慢消费者会「跳过」中间包，只拿到最新可见包；多消费者互不影响各自进度。与视频不同的是，**没有驱动层 buffer 的 QBUF**，仅有堆上 `vector` 与 `shared_ptr` 引用计数。
+- 发停止信号（`running_ = false`）
+- 唤醒等待中的消费者（`notify_all`）
+- 若采集线程可等待，则在 `stop()` 内 `join`
 
-### 4.3 回收模型
+`record-audio` CLI 的实际关闭顺序如下：
 
-- 包从队列移除后，若不再有 `shared_ptr<audio_frame>` 引用，则 `pcm_data` 与 `audio_frame` 本身由标准库释放。  
-- `AudioConsumerBase` 析构时在 `provider_` 非空情况下会调用 `unregister_consumer(consumer_id_)`。**`consumer_id_t` 自 `0` 起均为合法 ID**（与 `AudioCaptureProvider::register_consumer()` 返回值一致）。
+1. `provider->stop()`
+2. 等待消费者线程 `join`
 
-## 5. `audio_frame` 与清理场景
+建议业务侧遵循同样顺序，避免消费者线程尚未退出就提前析构相关对象。
 
-`audio_frame`（独立头文件 `audio_frame.hpp`）字段含义：
+## 6. `audio_frame` 数据约定
 
-| 字段 | 含义 |
-|------|------|
-| `seq` | 全局递增序号，用于消费者 `last_seq` 推进与选包。 |
-| `pcm_data` | S16_LE 交织样本；长度为 `frames * channels`（与本次 `read` 实际帧数一致）。 |
-| `timestamp` | 采集时刻的 `steady_clock` 时间戳计数值（单位与 `count()` 一致，业务若要对齐视频时间线需自行约定换算）。 |
+`audio_frame` 字段：
 
-**`audio_frame` 自身不携带声道数**；声道数与构造 `AudioCaptureProvider` 时传入的 `channels` 一致，消费端需与 Provider 约定对齐（例如单写死为 1 声道，或上层配置与 WAV/编码器元数据一致）。
+- `seq`：全局递增序号
+- `pcm_data`：`S16_LE` 交织样本，长度为本次读取的 `frames * channels`
+- `timestamp`：`steady_clock` 计数值（单位取决于 `count()` 的底层周期）
 
-### 5.1 PCM 数据存放（格式与多声道交织）
+补充说明：
 
-- **样本类型**：固定为 **有符号 16 位小端**（`S16_LE`），与 ALSA `SND_PCM_FORMAT_S16_LE` 一致。  
-- **内存布局**：`pcm_data` 为 **一维** `std::vector<int16_t>`，采用 **`SND_PCM_ACCESS_RW_INTERLEAVED`（交织访问）**，即 ALSA 单次 `snd_pcm_readi` 返回缓冲区在内存中的自然顺序，**未做按声道拆平面**（无独立的 L/R 缓冲区）。  
-- **「帧」（frame）语义**：在 ALSA 中表示**同一时刻全部声道各一个采样**；`snd_pcm_readi` 的第三个参数 **`frame_size`** 是**帧数**，单次成功读取后用户态有效元素个数为 **`frames * channels`**（`frames` 为本次返回值，可能小于请求的 `frame_size`）。  
-- **多声道下标标系**（以立体声 `channels = 2` 为例）：线性下标与时间的对应关系为  
-  `[0]=ch0_t0, [1]=ch1_t0, [2]=ch0_t1, [3]=ch1_t1, …`。一般声卡上 **ch0/ch1 对应左/右声道**（仍以设备/驱动为准）。  
-- **单声道**：等价于仅按时间排列的 `int16_t` 序列，长度为 `frames * 1`。  
-- **写文件**：标准 WAV 对多声道 PCM 同样要求 **交织**，本仓库 `record-audio` 在头里写入的 `channels`、`sample_rate` 与上述 `pcm_data` 布局一致即可被常见播放器正确解码。
-
-### 5.2 包从队列消失或被丢弃
-
-包会在以下场景从队列消失或被丢弃：
-
-1. **某包对该消费者已处理或已跳过**  
-   `wait_audio` 在返回最新包的路径上，会将该消费者从更早包的 `pending_consumers` 中移除；若某包不再被任何消费者等待，则从 `list` 中擦除。
-
-2. **队列超容量**  
-   超过 `max_queue_capacity_` 时丢弃队头最老包。
-
-3. **消费者注销**  
-   `unregister_consumer` 将该 ID 从所有元素的 `pending_consumers` 中删除，并删除已无待处理消费者的元素。
-
-4. **停止**  
-   `stop()` 清空队列；已返回给业务层的 `shared_ptr` 仍有效直至最后持有者释放。
+- `audio_frame` 内不存 `channels/sample_rate`；消费方需和 provider 参数保持一致
+- 多声道布局为交织（例如双声道：`L0, R0, L1, R1, ...`）
+- 由于队列节点持 `shared_ptr`，帧内存在最后一个引用释放后自动回收

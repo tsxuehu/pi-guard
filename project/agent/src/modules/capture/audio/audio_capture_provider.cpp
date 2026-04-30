@@ -52,17 +52,16 @@ bool AudioCaptureProvider::start() {
 void AudioCaptureProvider::stop() {
     if (!running_.exchange(false)) {
         logger->debug("stop called while already stopped");
+        if (produce_thread_.joinable()) {
+            produce_thread_.join();
+        }
         return;
     }
-    // stop 只负责发停止信号并唤醒等待者，避免在退出路径上做额外同步导致卡住
+    // stop 同时负责发停止信号、唤醒等待者并回收采集线程。
     queue_cv_.notify_all();
-}
-
-void AudioCaptureProvider::wait_producer_exit() {
-    if (!produce_thread_.joinable()) {
-        throw std::runtime_error("AudioCaptureProvider: produce_thread is not joinable");
+    if (produce_thread_.joinable()) {
+        produce_thread_.join();
     }
-    produce_thread_.join();
 }
 
 AudioCaptureProvider::consumer_id_t AudioCaptureProvider::register_consumer() {

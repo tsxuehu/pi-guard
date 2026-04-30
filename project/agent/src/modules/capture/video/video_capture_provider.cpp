@@ -43,7 +43,7 @@ void VideoCaptureProvider::start() {
 
 void VideoCaptureProvider::stop() {
     running_ = false;
-    cv_.notify_all();
+    queue_cv_.notify_all();
     stream_off();
     if (cap_thread_.joinable()) cap_thread_.join();
     unmap_all();
@@ -99,7 +99,7 @@ void VideoCaptureProvider::unregister_consumer(consumer_id_t consumer_id) {
     std::lock_guard lock(mtx_);
     consumers_.erase(consumer_id);
     cleanup_consumer_pending_locked(consumer_id, 0, true);
-    cv_.notify_all();
+    queue_cv_.notify_all();
 }
 
 bool VideoCaptureProvider::configure_v4l2_capture() {
@@ -213,7 +213,7 @@ void VideoCaptureProvider::close_fd() noexcept {
 void VideoCaptureProvider::produce_loop() {
     if (!init_v4l2_capture()) {
         running_ = false;
-        cv_.notify_all();
+        queue_cv_.notify_all();
         return;
     }
 
@@ -255,14 +255,14 @@ void VideoCaptureProvider::produce_loop() {
                 queue_.pop_front();
             }
         }
-        cv_.notify_all();
+        queue_cv_.notify_all();
     }
 }
 
 std::vector<std::shared_ptr<VideoFrame>> VideoCaptureProvider::wait_frame(
     consumer_id_t consumer_id, uint64_t last_seq) {
     std::unique_lock lock(mtx_);
-    cv_.wait(lock, [this, consumer_id, last_seq] {
+    queue_cv_.wait(lock, [this, consumer_id, last_seq] {
         if (!running_) {
             return true;
         }
