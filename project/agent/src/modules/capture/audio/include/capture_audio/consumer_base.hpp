@@ -32,17 +32,10 @@ public:
     }
 
     void run() {
-        bool first_frame_logged = false;
         while (running_) {
             auto frames = provider_->wait_audio(consumer_id_, last_seq_);
             if (frames.empty()) {
                 break;
-            }
-
-            if (!first_frame_logged) {
-                logger->info("consumer '" + name_ + "' received first frame, seq=" +
-                             std::to_string(frames.front()->seq));
-                first_frame_logged = true;
             }
             process(frames);
             last_seq_ = frames.back()->seq;

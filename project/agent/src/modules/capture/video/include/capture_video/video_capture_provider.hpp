@@ -41,8 +41,8 @@ public:
     // 注销指定消费者，并清理其在队列中的 pending 标记。
     void unregister_consumer(consumer_id_t consumer_id);
 
-    // 供不同速率消费者获取可用帧；自动将更老帧标记为 skipped
-    std::shared_ptr<VideoFrame> wait_frame(consumer_id_t consumer_id, uint64_t last_seq);
+    // 供不同速率消费者获取可用帧；返回所有 seq > last_seq 的可用帧
+    std::vector<std::shared_ptr<VideoFrame>> wait_frame(consumer_id_t consumer_id, uint64_t last_seq);
 
 private:
     struct queued_frame {
@@ -75,8 +75,8 @@ private:
     void produce_loop();
     // 要求调用方已持锁；将消费者从所有帧的 pending 集合移除。
     void remove_consumer_from_pending_locked(consumer_id_t consumer_id);
-    // 要求调用方已持锁；清理已被所有消费者处理完成的队首帧。
-    void prune_finished_frames_locked();
+    // 要求调用方已持锁；按模式移除消费者 pending 并回收已完成帧。
+    void cleanup_consumer_pending_locked(consumer_id_t consumer_id, uint64_t last_seq, bool clear_all);
 
     std::string device_;                   // 采集设备路径，例如 /dev/video0
     int fd_;                               // 设备文件描述符；打开后用于所有 v4l2 ioctl 调用

@@ -76,6 +76,8 @@ public:
 
 private:
     void produce_loop();
+    // 需在持有 queue_mtx_ 时调用；按模式清理消费者 pending 并回收空节点。
+    void cleanup_consumer_pending_locked(consumer_id_t id, uint64_t last_seq, bool clear_all);
 
 private:
     std::string device_;

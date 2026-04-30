@@ -79,17 +79,26 @@ void VideoCaptureProvider::remove_consumer_from_pending_locked(consumer_id_t con
     }
 }
 
-void VideoCaptureProvider::prune_finished_frames_locked() {
-    while (!queue_.empty() && queue_.front().pending_consumers.empty()) {
-        queue_.pop_front();
+void VideoCaptureProvider::cleanup_consumer_pending_locked(
+    consumer_id_t consumer_id, uint64_t last_seq, bool clear_all) {
+    for (auto it = queue_.begin(); it != queue_.end(); ) {
+        const bool should_clear =
+            clear_all || (it->frame->seq > last_seq && it->pending_consumers.count(consumer_id) > 0);
+        if (should_clear) {
+            it->pending_consumers.erase(consumer_id);
+        }
+        if (it->pending_consumers.empty()) {
+            it = queue_.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
 void VideoCaptureProvider::unregister_consumer(consumer_id_t consumer_id) {
     std::lock_guard lock(mtx_);
     consumers_.erase(consumer_id);
-    remove_consumer_from_pending_locked(consumer_id);
-    prune_finished_frames_locked();
+    cleanup_consumer_pending_locked(consumer_id, 0, true);
     cv_.notify_all();
 }
 
@@ -245,14 +254,13 @@ void VideoCaptureProvider::produce_loop() {
             while (queue_.size() > max_capacity_) {
                 queue_.pop_front();
             }
-
-            prune_finished_frames_locked();
         }
         cv_.notify_all();
     }
 }
 
-std::shared_ptr<VideoFrame> VideoCaptureProvider::wait_frame(consumer_id_t consumer_id, uint64_t last_seq) {
+std::vector<std::shared_ptr<VideoFrame>> VideoCaptureProvider::wait_frame(
+    consumer_id_t consumer_id, uint64_t last_seq) {
     std::unique_lock lock(mtx_);
     cv_.wait(lock, [this, consumer_id, last_seq] {
         if (!running_) {
@@ -267,29 +275,24 @@ std::shared_ptr<VideoFrame> VideoCaptureProvider::wait_frame(consumer_id_t consu
     });
 
     if (!running_ || queue_.empty() || consumers_.count(consumer_id) == 0) {
-        return nullptr;
+        return {};
     }
 
-    size_t selected_idx = queue_.size();
+    std::vector<std::shared_ptr<VideoFrame>> matched_frames;
     for (size_t i = 0; i < queue_.size(); ++i) {
         const auto& item = queue_[i];
         if (item.frame->seq > last_seq && item.pending_consumers.count(consumer_id) > 0) {
-            selected_idx = i;
+            matched_frames.push_back(item.frame);
         }
     }
 
-    if (selected_idx == queue_.size()) {
-        return nullptr;
+    if (matched_frames.empty()) {
+        return {};
     }
 
-    // 慢消费者追到更新帧时，旧帧按 skipped 处理。
-    for (size_t i = 0; i <= selected_idx; ++i) {
-        queue_[i].pending_consumers.erase(consumer_id);
-    }
-
-    auto out = queue_[selected_idx].frame;
-    prune_finished_frames_locked();
-    return out;
+    // 将命中的帧标记为该消费者已处理。
+    cleanup_consumer_pending_locked(consumer_id, last_seq, false);
+    return matched_frames;
 }
 
 }  // namespace piguard::capture_video

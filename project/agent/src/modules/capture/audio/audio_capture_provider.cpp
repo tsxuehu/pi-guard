@@ -77,15 +77,8 @@ void AudioCaptureProvider::unregister_consumer(consumer_id_t id) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
     active_consumers_.erase(id);
     logger->debug("unregistered consumer id=" + std::to_string(id));
-    
-    for (auto it = queue_.begin(); it != queue_.end(); ) {
-        it->pending_consumers.erase(id);
-        if (it->pending_consumers.empty()) {
-            it = queue_.erase(it);
-        } else {
-            ++it;
-        }
-    }
+
+    cleanup_consumer_pending_locked(id, 0, true);
 }
 
 std::vector<std::shared_ptr<audio_frame>> AudioCaptureProvider::wait_audio(consumer_id_t id, uint64_t last_seq) {
@@ -120,18 +113,25 @@ std::vector<std::shared_ptr<audio_frame>> AudioCaptureProvider::wait_audio(consu
     }
 
     // 将当前命中的所有帧标记为该消费者已处理，保留其余消费者状态。
-    for (auto current = queue_.begin(); current != queue_.end(); ) {
-        if (current->frame->seq > last_seq && current->pending_consumers.count(id) > 0) {
-            current->pending_consumers.erase(id);
-        }
-        if (current->pending_consumers.empty()) {
-            current = queue_.erase(current);
-        } else {
-            ++current;
-        }
-    }
+    cleanup_consumer_pending_locked(id, last_seq, false);
 
     return matched_frames;
+}
+
+void AudioCaptureProvider::cleanup_consumer_pending_locked(
+    consumer_id_t id, uint64_t last_seq, bool clear_all) {
+    for (auto it = queue_.begin(); it != queue_.end(); ) {
+        const bool should_clear = clear_all ||
+            (it->frame->seq > last_seq && it->pending_consumers.count(id) > 0);
+        if (should_clear) {
+            it->pending_consumers.erase(id);
+        }
+        if (it->pending_consumers.empty()) {
+            it = queue_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void AudioCaptureProvider::produce_loop() {

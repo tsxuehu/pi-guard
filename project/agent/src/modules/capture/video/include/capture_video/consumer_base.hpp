@@ -37,23 +37,24 @@ public:
         auto next_process_time = std::chrono::steady_clock::now();
 
         while (running_) {
-            auto frame = provider_->wait_frame(consumer_id_, last_seq_);
-            if (!frame) break;
+            auto frames = provider_->wait_frame(consumer_id_, last_seq_);
+            if (frames.empty()) break;
 
-            bool should_process = true;
-            const auto now = std::chrono::steady_clock::now();
-            if (now < next_process_time) {
-                should_process = false;
-            } else {
-                next_process_time = now + process_interval;
+            for (const auto& frame : frames) {
+                bool should_process = true;
+                const auto now = std::chrono::steady_clock::now();
+                if (now < next_process_time) {
+                    should_process = false;
+                } else {
+                    next_process_time = now + process_interval;
+                }
+
+                // 多个消费者可以获取同一个 frame 引用
+                if (should_process && frame->seq % step == 0) {
+                    process(frame);
+                }
+                last_seq_ = frame->seq;
             }
-
-            // 多个消费者可以获取同一个 frame 引用
-            if (should_process && frame->seq % step == 0) {
-                process(frame);
-            }
-
-            last_seq_ = frame->seq;
         }
     }
 
