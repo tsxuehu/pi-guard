@@ -1,23 +1,18 @@
 #pragma once
 
 #include "video_capture_provider.hpp"
-#include <chrono>
 #include <atomic>
 #include <memory>
-#include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace piguard::capture_video {
 
 class ConsumerBase {
 public:
-    ConsumerBase(std::shared_ptr<VideoCaptureProvider> provider, int target_fps, std::string consumer_name)
+    ConsumerBase(std::shared_ptr<VideoCaptureProvider> provider, std::string consumer_name)
         : provider_(std::move(provider)),
-          target_fps_(target_fps),
           name_(std::move(consumer_name)) {
-        if (target_fps_ <= 0) {
-            throw std::invalid_argument("target_fps must be > 0");
-        }
         if (provider_) {
             consumer_id_ = provider_->register_consumer();
         }
@@ -30,31 +25,11 @@ public:
     }
 
     void run() {
-        const int source_fps = provider_->capture_fps();
-        // 如果 target_fps 为 15，source_fps 为 30，step 为 2，则每两帧处理一帧。
-        const int step = (target_fps_ >= source_fps) ? 1 : (source_fps / target_fps_);
-        const auto process_interval = std::chrono::milliseconds(1000 / target_fps_);
-        auto next_process_time = std::chrono::steady_clock::now();
-
         while (running_) {
             auto frames = provider_->wait_frame(consumer_id_, last_seq_);
             if (frames.empty()) break;
-
-            for (const auto& frame : frames) {
-                bool should_process = true;
-                const auto now = std::chrono::steady_clock::now();
-                if (now < next_process_time) {
-                    should_process = false;
-                } else {
-                    next_process_time = now + process_interval;
-                }
-
-                // 多个消费者可以获取同一个 frame 引用
-                if (should_process && frame->seq % step == 0) {
-                    process(frame);
-                }
-                last_seq_ = frame->seq;
-            }
+            process(frames);
+            last_seq_ = frames.back()->seq;
         }
     }
 
@@ -62,13 +37,12 @@ public:
 
     const std::string& name() const { return name_; }
 
-    virtual void process(const std::shared_ptr<VideoFrame>& frame) = 0;
+    virtual void process(const std::vector<std::shared_ptr<VideoFrame>>& frames) = 0;
 
 protected:
     std::shared_ptr<VideoCaptureProvider> provider_;
     std::string name_;
     VideoCaptureProvider::consumer_id_t consumer_id_{0};
-    int target_fps_;
     uint64_t last_seq_{0};
     std::atomic<bool> running_{true};
 };

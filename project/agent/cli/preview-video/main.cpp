@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
         provider->start();
 
         cv::namedWindow(kWindowName, cv::WINDOW_AUTOSIZE);
-        FrameViewerConsumer consumer(provider, kCaptureFps, "viewer", kWidth, kHeight);
+        FrameViewerConsumer consumer(provider, "viewer", kWidth, kHeight);
         consumer.run();
 
         provider->stop();
