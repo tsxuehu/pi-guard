@@ -58,7 +58,11 @@ void AudioCaptureProvider::stop() {
         return;
     }
     // stop 同时负责发停止信号、唤醒等待者并回收采集线程。
-    queue_cv_.notify_all();
+    // 须在 queue_mtx_ 下 notify：避免等待者在「谓词为假、尚未进入 wait」时已发出通知而丢失唤醒。
+    {
+        std::lock_guard<std::mutex> lock(queue_mtx_);
+        queue_cv_.notify_all();
+    }
     if (produce_thread_.joinable()) {
         produce_thread_.join();
     }
@@ -80,7 +84,7 @@ void AudioCaptureProvider::unregister_consumer(consumer_id_t id) {
     cleanup_consumer_pending_locked(id, 0, true);
 }
 
-std::vector<std::shared_ptr<audio_frame>> AudioCaptureProvider::wait_audio(consumer_id_t id, uint64_t last_seq) {
+std::vector<std::shared_ptr<AudioFrame>> AudioCaptureProvider::wait_audio(consumer_id_t id, uint64_t last_seq) {
     std::unique_lock<std::mutex> lock(queue_mtx_);
 
     queue_cv_.wait(lock, [this, id, last_seq] {
@@ -101,7 +105,7 @@ std::vector<std::shared_ptr<audio_frame>> AudioCaptureProvider::wait_audio(consu
         return {};
     }
 
-    std::vector<std::shared_ptr<audio_frame>> matched_frames;
+    std::vector<std::shared_ptr<AudioFrame>> matched_frames;
     for (const auto& item : queue_) {
         if (item.frame->seq > last_seq && item.pending_consumers.count(id) > 0) {
             matched_frames.push_back(item.frame);
@@ -165,52 +169,55 @@ void AudioCaptureProvider::produce_loop() {
         }
         return;
     }
-    logger->info("ALSA capture initialized");
-    const int nonblock_ret = snd_pcm_nonblock(handle, 1);
-    if (nonblock_ret < 0) {
-        logger->warn("failed to enable nonblock read: " + std::string(snd_strerror(nonblock_ret)));
-    } else {
-        logger->info("enabled nonblock read mode");
+
+    // snd_pcm_set_params 在 capture 路径上会把 start_threshold 设为 buffer_size，
+    // 这样首次 snd_pcm_readi 想隐式 start 时（avail=0 < buffer_size）不会真的启动；
+    // 部分 USB Audio 驱动在「未 RUNNING 就 readi」时直接返回 -EIO 并循环刷屏。
+    // 改为显式 snd_pcm_start，让设备立刻进入 RUNNING。
+    const int start_ret = snd_pcm_start(handle);
+    if (start_ret < 0) {
+        logger->error("snd_pcm_start failed: " + std::string(snd_strerror(start_ret)));
+        running_ = false;
+        (void)snd_pcm_close(handle);
+        {
+            std::lock_guard<std::mutex> lock(queue_mtx_);
+            queue_cv_.notify_all();
+        }
+        return;
     }
+    logger->info("ALSA capture initialized");
 
     const unsigned frame_size =
         (sample_rate_ > 0) ? (sample_rate_ * 20u / 1000u) : 320u;
     std::vector<int16_t> buffer(static_cast<size_t>(frame_size) * channels_);
-    bool first_frame_logged = false;
 
     while (running_.load(std::memory_order_acquire)) {
-        int frames = snd_pcm_readi(handle, buffer.data(), frame_size);
+        const int pcm_readi_ret = snd_pcm_readi(handle, buffer.data(), frame_size);
 
         if (!running_.load(std::memory_order_acquire)) {
-            logger->info("snd_pcm_readi returned after running_ set to false, frames=" + std::to_string(frames));
+            logger->info("snd_pcm_readi returned after running_ set to false, pcm_readi_ret=" +
+                         std::to_string(pcm_readi_ret));
             break;
         }
 
-        if (frames == -EPIPE) {
-            logger->warn("audio overrun (EPIPE), preparing pcm");
-            snd_pcm_prepare(handle);
-            continue;
-        }
-        if (frames == -EAGAIN) {
-            // 不依赖 ALSA 自己的等待；每 5ms 检查一次 running_，确保 stop 能及时退出
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-            continue;
-        }
-        if (frames < 0) {
-            logger->error("snd_pcm_readi failed: " + std::string(snd_strerror(frames)));
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (pcm_readi_ret < 0) {
+            // snd_pcm_recover 统一处理 EPIPE/ESTRPIPE/EINTR 等，必要时 prepare/resume；
+            // 对 EIO 等不可恢复错误返回原始负值，由我们写日志并退避重试。
+            const int recover_ret = snd_pcm_recover(handle, pcm_readi_ret, 1);
+            if (recover_ret < 0) {
+                logger->error("snd_pcm_readi failed: " + std::string(snd_strerror(pcm_readi_ret)) +
+                              ", recover failed: " + std::string(snd_strerror(recover_ret)));
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
             continue;
         }
 
-        auto af = std::make_shared<audio_frame>();
+        const int pcm_period_frames = pcm_readi_ret;
+
+        auto af = std::make_shared<AudioFrame>();
         af->seq = next_seq_++;
-        af->pcm_data.assign(buffer.begin(), buffer.begin() + frames * channels_);
+        af->pcm_data.assign(buffer.begin(), buffer.begin() + pcm_period_frames * channels_);
         af->timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        if (!first_frame_logged) {
-            logger->info("first audio frame captured, samples=" +
-                         std::to_string(static_cast<size_t>(frames) * channels_));
-            first_frame_logged = true;
-        }
 
         {
             std::lock_guard<std::mutex> lock(queue_mtx_);
@@ -219,8 +226,8 @@ void AudioCaptureProvider::produce_loop() {
             if (queue_.size() > max_queue_capacity_) {
                 queue_.pop_front();
             }
+            queue_cv_.notify_all();
         }
-        queue_cv_.notify_all();
     }
     logger->info("capture loop observed running=false, leaving read loop");
 

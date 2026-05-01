@@ -1,6 +1,5 @@
 add_executable(record-audio
     main.cpp
-    shutdown_manager.cpp
     wav_writer.cpp
     recording_consumer.cpp
 )
@@ -13,5 +12,6 @@ target_include_directories(record-audio
 target_link_libraries(record-audio
     PRIVATE
         pi_guard_audio_capture
+        pi_guard_foundation
         pi_guard_infra_log
 )

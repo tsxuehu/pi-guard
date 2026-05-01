@@ -47,7 +47,7 @@ public:
     /** 仅在构造时给定，生命周期内不变的消费者标识（如线程名 / 日志 tag） */
     const std::string& name() const { return name_; }
 
-    virtual void process(const std::vector<std::shared_ptr<audio_frame>>& frames) = 0;
+    virtual void process(const std::vector<std::shared_ptr<AudioFrame>>& frames) = 0;
 
 protected:
     std::shared_ptr<AudioCaptureProvider> provider_;

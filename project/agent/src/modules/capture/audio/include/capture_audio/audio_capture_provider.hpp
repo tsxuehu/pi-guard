@@ -23,7 +23,7 @@ public:
     using consumer_id_t = uint32_t;
 
     struct queued_audio {
-        std::shared_ptr<audio_frame> frame;
+        std::shared_ptr<AudioFrame> frame;
         std::set<consumer_id_t> pending_consumers; // 尚未处理此段的消费者集合
     };
 
@@ -66,7 +66,7 @@ public:
      * @param last_seq 上次处理的序号
      * @return 匹配的音频帧列表，若停止或无可用帧则返回空列表
      */
-    std::vector<std::shared_ptr<audio_frame>> wait_audio(consumer_id_t id, uint64_t last_seq);
+    std::vector<std::shared_ptr<AudioFrame>> wait_audio(consumer_id_t id, uint64_t last_seq);
 
 private:
     void produce_loop();

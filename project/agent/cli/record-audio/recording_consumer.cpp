@@ -7,7 +7,7 @@ RecordingConsumer::RecordingConsumer(std::shared_ptr<piguard::capture_audio::Aud
       writer_(std::move(writer)) {}
 
 void RecordingConsumer::process(
-    const std::vector<std::shared_ptr<piguard::capture_audio::audio_frame>>& frames) {
+    const std::vector<std::shared_ptr<piguard::capture_audio::AudioFrame>>& frames) {
     for (const auto& frame : frames) {
         if (!frame || frame->pcm_data.empty()) {
             continue;

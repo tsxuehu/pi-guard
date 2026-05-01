@@ -8,7 +8,7 @@
  */
 namespace piguard::capture_audio {
 
-struct audio_frame {
+struct AudioFrame {
     uint64_t seq;
     std::vector<int16_t> pcm_data; // PCM S16_LE 交织数据
     uint64_t timestamp;            // 采集时刻（steady_clock epoch，实现侧约定单位）

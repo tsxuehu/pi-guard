@@ -1,8 +1,8 @@
 #include "capture_audio/audio_capture_provider.hpp"
+#include "foundation/shutdown_manager.hpp"
 #include "infra_log/logger_factory.hpp"
 #include "infra_log/logger.hpp"
 #include "recording_consumer.hpp"
-#include "shutdown_manager.hpp"
 
 #include <cerrno>
 #include <csignal>
@@ -17,7 +17,7 @@ const std::shared_ptr<piguard::infra_log::Logger> logger =
     piguard::infra_log::LogFactory::getLogger("RecordAudioCli");
 
 /** arecord -l: card 0 / device 6 — sof-hda-dsp DMIC */
-constexpr const char* kAlsaDevice = "plughw:0,6";
+constexpr const char* kAlsaDevice = "hw:1,0";
 constexpr const char* kOutFileName = ".tmp/record.wav";
 constexpr unsigned kSampleRateHz = 16000;
 constexpr unsigned kChannels = 1;
@@ -35,8 +35,8 @@ int main() {
         }
     }
 
-    if (std::signal(SIGINT, ShutdownManager::handle_signal) == SIG_ERR ||
-        std::signal(SIGTERM, ShutdownManager::handle_signal) == SIG_ERR) {
+    if (std::signal(SIGINT, piguard::foundation::ShutdownManager::handle_signal) == SIG_ERR ||
+        std::signal(SIGTERM, piguard::foundation::ShutdownManager::handle_signal) == SIG_ERR) {
         logger->error("failed to register signal handler");
         return 1;
     }
@@ -63,7 +63,7 @@ int main() {
                  ", press Ctrl+C to stop");
 
     logger->info("waiting stop signal");
-    ShutdownManager::wait_for_shutdown();
+    piguard::foundation::ShutdownManager::wait_for_shutdown();
 
     logger->info("signal received, calling provider stop");
     provider->stop();

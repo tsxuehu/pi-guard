@@ -14,7 +14,7 @@ public:
                       WavWriter writer);
 
 private:
-    void process(const std::vector<std::shared_ptr<piguard::capture_audio::audio_frame>>& frames) override;
+    void process(const std::vector<std::shared_ptr<piguard::capture_audio::AudioFrame>>& frames) override;
 
     WavWriter writer_;
 };

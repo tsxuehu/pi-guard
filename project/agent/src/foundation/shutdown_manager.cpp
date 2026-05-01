@@ -1,9 +1,11 @@
-#include "shutdown_manager.hpp"
+#include "foundation/shutdown_manager.hpp"
 
 #include <atomic>
 #include <condition_variable>
 #include <csignal>
 #include <mutex>
+
+namespace piguard::foundation {
 
 namespace {
 std::mutex g_shutdown_mutex;
@@ -29,3 +31,5 @@ void ShutdownManager::wait_for_shutdown() {
         return g_ready_to_stop.load(std::memory_order_acquire);
     });
 }
+
+}  // namespace piguard::foundation
