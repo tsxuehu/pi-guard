@@ -6,6 +6,7 @@
 #include <opencv2/highgui.hpp>
 
 #include <csignal>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <thread>
@@ -16,6 +17,7 @@ const std::shared_ptr<piguard::infra_log::Logger> logger =
 constexpr int kWidth = 640;
 constexpr int kHeight = 480;
 constexpr int kCaptureFps = 30;
+constexpr uint32_t kBufferCount = 4;
 constexpr size_t kProviderQueueCapacity = 30;
 constexpr char kWindowName[] = "pi-guard-view-video";
 }  // namespace
@@ -30,7 +32,7 @@ int main(int argc, char** argv) {
     }
 
     auto provider = std::make_shared<piguard::capture_video::VideoCaptureProvider>(
-        device, kCaptureFps, kWidth, kHeight, kProviderQueueCapacity);
+        device, kCaptureFps, kWidth, kHeight, kBufferCount, kProviderQueueCapacity);
 
     // 先注册消费者再启动采集，避免早期帧 pending_consumers 为空、无主驻留在队列里。
     FrameViewerConsumer consumer(provider, "viewer", kWidth, kHeight);

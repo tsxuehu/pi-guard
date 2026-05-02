@@ -17,8 +17,6 @@ namespace {
 const std::shared_ptr<piguard::infra_log::Logger> logger = 
     piguard::infra_log::LogFactory::getLogger("VideoCaptureProvider");
 
-constexpr uint32_t kDefaultBufferCount = 4;
-
 int xioctl(int fd, unsigned long request, void* arg) {
     int ret = -1;
     do {
@@ -31,12 +29,14 @@ int xioctl(int fd, unsigned long request, void* arg) {
 namespace piguard::capture_video {
 
 VideoCaptureProvider::VideoCaptureProvider(
-    std::string device, int capture_fps, int capture_width, int capture_height, size_t max_capacity)
+    std::string device, int capture_fps, int capture_width, int capture_height,
+    uint32_t buffer_count, size_t max_capacity)
     : device_(std::move(device)),
       fd_(-1),
       capture_fps_(capture_fps),
       capture_width_(capture_width),
       capture_height_(capture_height),
+      buffer_count_(buffer_count),
       max_capacity_(max_capacity) {}
 
 VideoCaptureProvider::~VideoCaptureProvider() {
@@ -52,6 +52,7 @@ void VideoCaptureProvider::start() {
                  ", fps=" + std::to_string(capture_fps_) +
                  ", width=" + std::to_string(capture_width_) +
                  ", height=" + std::to_string(capture_height_) +
+                 ", buffer_count=" + std::to_string(buffer_count_) +
                  ", max_capacity=" + std::to_string(max_capacity_));
     cap_thread_ = std::thread(&VideoCaptureProvider::produce_loop, this);
 }
@@ -179,8 +180,13 @@ bool VideoCaptureProvider::configure_v4l2_capture() {
 
 bool VideoCaptureProvider::request_and_map_buffers() {
     // 申请驱动缓冲区并映射到用户态，后续通过 buf.index 定位地址。
+    if (buffer_count_ < 2) {
+        logger->error("invalid buffer_count=" + std::to_string(buffer_count_) +
+                      ", must be >= 2");
+        return false;
+    }
     v4l2_requestbuffers req{};
-    req.count = kDefaultBufferCount;
+    req.count = buffer_count_;
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     req.memory = V4L2_MEMORY_MMAP;
     if (xioctl(fd_, VIDIOC_REQBUFS, &req) < 0) {
@@ -342,7 +348,7 @@ void VideoCaptureProvider::produce_loop() {
 
         {
             std::lock_guard lock(mtx_); // C++17 CTAD
-            queued_frame item;
+            QueuedFrame item;
             item.frame = std::move(frame);
             item.pending_consumers = consumers_;
             queue_.push_back(std::move(item));

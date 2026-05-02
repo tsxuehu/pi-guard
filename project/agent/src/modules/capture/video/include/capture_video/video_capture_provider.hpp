@@ -22,7 +22,8 @@ public:
         int capture_fps,
         int capture_width,
         int capture_height,
-        size_t max_capacity = 10);
+        uint32_t buffer_count,
+        size_t max_capacity);
     ~VideoCaptureProvider();
 
     // 禁用拷贝
@@ -45,12 +46,12 @@ public:
     std::vector<std::shared_ptr<VideoFrame>> wait_frame(consumer_id_t consumer_id, uint64_t last_seq);
 
 private:
-    struct queued_frame {
+    struct QueuedFrame {
         std::shared_ptr<VideoFrame> frame;
         std::unordered_set<consumer_id_t> pending_consumers;
     };
 
-    struct mmap_buffer {
+    struct MMapBuffer {
         void* start{nullptr};
         size_t length{0};
     };
@@ -83,14 +84,15 @@ private:
     int capture_fps_;                      // 期望采集帧率（用于 VIDIOC_S_PARM）
     int capture_width_;                    // 期望采集宽度（用于 VIDIOC_S_FMT）
     int capture_height_;                   // 期望采集高度（用于 VIDIOC_S_FMT）
+    uint32_t buffer_count_;                // V4L2 mmap 缓冲区个数（VIDIOC_REQBUFS req.count）
     size_t max_capacity_;                  // 分发队列最大帧数，超出时丢弃最旧帧
     uint64_t global_seq_{0};               // 全局递增帧序号，标识帧先后顺序
     consumer_id_t next_consumer_id_{1};    // 下一个消费者 ID 生成器
     std::atomic<bool> running_{false};     // 采集线程运行标志（start/stop 共享）
     bool stream_on_{false};                // v4l2 stream 是否已开启，避免重复 STREAMOFF
-    std::vector<mmap_buffer> mmap_buffers_;// mmap 缓冲区信息；按 v4l2 buffer index 索引
+    std::vector<MMapBuffer> mmap_buffers_;// mmap 缓冲区信息；按 v4l2 buffer index 索引
     std::unordered_set<consumer_id_t> consumers_; // 当前已注册消费者集合
-    std::deque<queued_frame> queue_;       // 帧分发队列；每帧记录待消费的消费者集合
+    std::deque<QueuedFrame> queue_;        // 帧分发队列；每帧记录待消费的消费者集合
     std::mutex mtx_;                       // 保护消费者集合与队列等共享状态
     std::condition_variable queue_cv_;     // 帧到达/停止时唤醒等待中的消费者
     std::thread cap_thread_;               // 后台采集线程（DQBUF -> 入队 -> 通知）
