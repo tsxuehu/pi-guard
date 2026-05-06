@@ -13,13 +13,13 @@ namespace piguard::processing_encoder {
 class IVideoFrameGetter {
 public:
     virtual ~IVideoFrameGetter() = default;
-    virtual std::shared_ptr<piguard::capture_video::VideoFrame> fetch_next_frame() = 0;
+    virtual std::vector<std::shared_ptr<piguard::capture_video::VideoFrame>> fetch_frames() = 0;
 };
 
 class IAudioFrameGetter {
 public:
     virtual ~IAudioFrameGetter() = default;
-    virtual std::shared_ptr<piguard::capture_audio::AudioFrame> fetch_next_frame() = 0;
+    virtual std::vector<std::shared_ptr<piguard::capture_audio::AudioFrame>> fetch_frames() = 0;
 };
 
 struct EncoderOptions {
@@ -38,26 +38,37 @@ enum class EncodedStreamType {
     kAudio
 };
 
-struct EncodedPacket {
+struct EncodedPacketBase {
     uint64_t seq{0};
-    EncodedStreamType stream_type{EncodedStreamType::kVideo};
     std::vector<uint8_t> data;
     int64_t pts{0};
     int64_t dts{0};
+    virtual ~EncodedPacketBase() = default;
+};
+
+struct EncodedVideoPacket : public EncodedPacketBase {
     bool key_frame{false};
 };
 
-struct EncodedStreamMeta {
+struct EncodedAudioPacket : public EncodedPacketBase {};
+
+struct EncodedStreamMetaBase {
     bool ready{false};
-    EncodedStreamType stream_type{EncodedStreamType::kVideo};
     int codec_id{0};
     int time_base_num{1};
     int time_base_den{1};
+    std::vector<uint8_t> extradata;
+    virtual ~EncodedStreamMetaBase() = default;
+};
+
+struct EncodedVideoStreamMeta : public EncodedStreamMetaBase {
     int width{0};
     int height{0};
+};
+
+struct EncodedAudioStreamMeta : public EncodedStreamMetaBase {
     int sample_rate{0};
     int channels{0};
-    std::vector<uint8_t> extradata;
 };
 
 }  // namespace piguard::processing_encoder

@@ -32,13 +32,13 @@ public:
 
     consumer_id_t register_consumer();
     void unregister_consumer(consumer_id_t consumer_id);
-    std::vector<std::shared_ptr<EncodedPacket>> wait_packet(consumer_id_t consumer_id, uint64_t last_seq);
-    EncodedStreamMeta video_stream_meta() const;
-    EncodedStreamMeta audio_stream_meta() const;
+    std::vector<std::shared_ptr<EncodedPacketBase>> wait_packet(consumer_id_t consumer_id, uint64_t last_seq);
+    EncodedVideoStreamMeta video_stream_meta() const;
+    EncodedAudioStreamMeta audio_stream_meta() const;
 
 private:
     struct QueuedPacket {
-        std::shared_ptr<EncodedPacket> packet;
+        std::shared_ptr<EncodedPacketBase> packet;
         std::unordered_set<consumer_id_t> pending_consumers;
     };
 
@@ -48,7 +48,7 @@ private:
     void close_audio_encoder();
     void video_encode_loop();
     void audio_encode_loop();
-    void enqueue_packet(std::shared_ptr<EncodedPacket> packet);
+    void enqueue_packet(std::shared_ptr<EncodedPacketBase> packet);
     void flush_video_encoder();
     void flush_audio_encoder();
     void cleanup_consumer_pending_locked(consumer_id_t consumer_id, uint64_t last_seq, bool clear_all);
@@ -67,13 +67,15 @@ private:
     std::deque<QueuedPacket> packet_queue_;
     mutable std::mutex packet_mtx_;
     std::condition_variable packet_cv_;
-    EncodedStreamMeta video_meta_;
-    EncodedStreamMeta audio_meta_;
+    EncodedVideoStreamMeta video_meta_;
+    EncodedAudioStreamMeta audio_meta_;
 
     struct VideoCodecContext;
     struct AudioCodecContext;
     std::unique_ptr<VideoCodecContext> video_ctx_;
     std::unique_ptr<AudioCodecContext> audio_ctx_;
+
+    std::vector<int16_t> audio_pcm_buf_;
 };
 
 }  // namespace piguard::processing_encoder

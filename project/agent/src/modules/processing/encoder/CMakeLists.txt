@@ -21,6 +21,7 @@ target_link_libraries(pi_guard_encoder
         pi_guard_foundation
         pi_guard_video_capture
         pi_guard_audio_capture
+        pi_guard_infra_log
         PkgConfig::AVCODEC
         PkgConfig::AVUTIL
         PkgConfig::SWSCALE

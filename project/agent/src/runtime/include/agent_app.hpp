@@ -56,7 +56,7 @@ private:
     capture_audio::AudioCapture audio_capture_;
 
     processing::MotionDetect motion_detect_;
-    processing::Encoder encoder_;
+    processing_encoder::Encoder encoder_;
     processing::EchoCanceller echo_canceller_;
 
     output::FileWriter file_writer_;

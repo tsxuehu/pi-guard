@@ -11,13 +11,12 @@ VideoProviderAdapter::~VideoProviderAdapter() {
     provider_.unregister_consumer(consumer_id_);
 }
 
-std::shared_ptr<capture_video::VideoFrame> VideoProviderAdapter::fetch_next_frame() {
+std::vector<std::shared_ptr<capture_video::VideoFrame>> VideoProviderAdapter::fetch_frames() {
     auto frames = provider_.wait_frame(consumer_id_, last_seq_);
-    if (frames.empty()) {
-        return nullptr;
+    if (!frames.empty()) {
+        last_seq_ = frames.back()->seq;
     }
-    last_seq_ = frames.back()->seq;
-    return frames.back();
+    return frames;
 }
 
 }  // namespace piguard::processing_encoder

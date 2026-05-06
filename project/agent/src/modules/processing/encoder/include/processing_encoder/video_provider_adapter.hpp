@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "capture_video/video_capture_provider.hpp"
 #include "processing_encoder/encoder_types.hpp"
@@ -16,7 +17,7 @@ public:
     VideoProviderAdapter(const VideoProviderAdapter&) = delete;
     VideoProviderAdapter& operator=(const VideoProviderAdapter&) = delete;
 
-    std::shared_ptr<piguard::capture_video::VideoFrame> fetch_next_frame() override;
+    std::vector<std::shared_ptr<piguard::capture_video::VideoFrame>> fetch_frames() override;
 
 private:
     piguard::capture_video::VideoCaptureProvider& provider_;

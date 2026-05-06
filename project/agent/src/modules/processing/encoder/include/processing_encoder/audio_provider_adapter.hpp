@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "capture_audio/audio_capture_provider.hpp"
 #include "processing_encoder/encoder_types.hpp"
@@ -16,7 +17,7 @@ public:
     AudioProviderAdapter(const AudioProviderAdapter&) = delete;
     AudioProviderAdapter& operator=(const AudioProviderAdapter&) = delete;
 
-    std::shared_ptr<piguard::capture_audio::AudioFrame> fetch_next_frame() override;
+    std::vector<std::shared_ptr<piguard::capture_audio::AudioFrame>> fetch_frames() override;
 
 private:
     piguard::capture_audio::AudioCaptureProvider& provider_;

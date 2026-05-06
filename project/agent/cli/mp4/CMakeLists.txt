@@ -5,6 +5,7 @@ pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
 
 add_executable(mp4-record-demo
     main.cpp
+    mp4_writer.cpp
 )
 
 target_link_libraries(mp4-record-demo

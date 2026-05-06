@@ -7,19 +7,14 @@
 #include "processing_encoder/encoder.hpp"
 #include "processing_encoder/video_provider_adapter.hpp"
 
+#include "mp4_writer.hpp"
+
 #include <atomic>
 #include <csignal>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
-
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/avutil.h>
-}
 
 namespace {
 const std::shared_ptr<piguard::infra_log::Logger> logger =
@@ -33,7 +28,8 @@ constexpr size_t kProviderQueueCapacity = 50;
 constexpr unsigned kAudioSampleRate = 16000;
 constexpr unsigned kAudioChannels = 1;
 constexpr const char* kDefaultVideoDevice = "/dev/video0";
-constexpr const char* kDefaultAudioDevice = "hw:1,0";
+/** 默认 ALSA default；按需改 argv[2] 或常量，参见 arecord -l */
+constexpr const char* kDefaultAudioDevice = "default";
 constexpr const char* kDefaultOutput = ".tmp/demo.mp4";
 }  // namespace
 
@@ -78,78 +74,19 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    AVFormatContext* ofmt_ctx = nullptr;
-    if (avformat_alloc_output_context2(&ofmt_ctx, nullptr, "mp4", output_file.c_str()) < 0 || ofmt_ctx == nullptr) {
-        logger->error("failed to alloc output format context");
-        encoder.stop();
-        audio_provider->stop();
-        video_provider->stop();
-        return 1;
-    }
-
     const auto vmeta = encoder.video_stream_meta();
     const auto ameta = encoder.audio_stream_meta();
     if (!vmeta.ready || !ameta.ready) {
         logger->error("encoder stream meta not ready");
-        avformat_free_context(ofmt_ctx);
         encoder.stop();
         audio_provider->stop();
         video_provider->stop();
         return 1;
     }
 
-    AVStream* vstream = avformat_new_stream(ofmt_ctx, nullptr);
-    AVStream* astream = avformat_new_stream(ofmt_ctx, nullptr);
-    if (vstream == nullptr || astream == nullptr) {
-        logger->error("failed to create output streams");
-        avformat_free_context(ofmt_ctx);
-        encoder.stop();
-        audio_provider->stop();
-        video_provider->stop();
-        return 1;
-    }
-
-    vstream->time_base = AVRational{vmeta.time_base_num, vmeta.time_base_den};
-    vstream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-    vstream->codecpar->codec_id = static_cast<AVCodecID>(vmeta.codec_id);
-    vstream->codecpar->width = vmeta.width;
-    vstream->codecpar->height = vmeta.height;
-    if (!vmeta.extradata.empty()) {
-        vstream->codecpar->extradata_size = static_cast<int>(vmeta.extradata.size());
-        vstream->codecpar->extradata = static_cast<uint8_t*>(
-            av_mallocz(vmeta.extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE));
-        std::memcpy(vstream->codecpar->extradata, vmeta.extradata.data(), vmeta.extradata.size());
-    }
-
-    astream->time_base = AVRational{ameta.time_base_num, ameta.time_base_den};
-    astream->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
-    astream->codecpar->codec_id = static_cast<AVCodecID>(ameta.codec_id);
-    astream->codecpar->sample_rate = ameta.sample_rate;
-    av_channel_layout_default(&astream->codecpar->ch_layout, ameta.channels);
-    if (!ameta.extradata.empty()) {
-        astream->codecpar->extradata_size = static_cast<int>(ameta.extradata.size());
-        astream->codecpar->extradata = static_cast<uint8_t*>(
-            av_mallocz(ameta.extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE));
-        std::memcpy(astream->codecpar->extradata, ameta.extradata.data(), ameta.extradata.size());
-    }
-
-    if (!(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-        if (avio_open(&ofmt_ctx->pb, output_file.c_str(), AVIO_FLAG_WRITE) < 0) {
-            logger->error("failed to open output file: " + output_file);
-            avformat_free_context(ofmt_ctx);
-            encoder.stop();
-            audio_provider->stop();
-            video_provider->stop();
-            return 1;
-        }
-    }
-
-    if (avformat_write_header(ofmt_ctx, nullptr) < 0) {
-        logger->error("failed to write mp4 header");
-        if (!(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-            avio_closep(&ofmt_ctx->pb);
-        }
-        avformat_free_context(ofmt_ctx);
+    piguard::Mp4Writer mp4_writer(output_file, vmeta, ameta);
+    if (!mp4_writer.write_header()) {
+        logger->error("failed to init mp4 writer");
         encoder.stop();
         audio_provider->stop();
         video_provider->stop();
@@ -168,28 +105,7 @@ int main(int argc, char** argv) {
                 continue;
             }
             for (const auto& item : packets) {
-                AVPacket pkt{};
-                av_init_packet(&pkt);
-                pkt.data = const_cast<uint8_t*>(item->data.data());
-                pkt.size = static_cast<int>(item->data.size());
-                pkt.pts = item->pts;
-                pkt.dts = item->dts;
-                if (item->key_frame) {
-                    pkt.flags |= AV_PKT_FLAG_KEY;
-                }
-
-                if (item->stream_type == piguard::processing_encoder::EncodedStreamType::kVideo) {
-                    pkt.stream_index = vstream->index;
-                    av_packet_rescale_ts(&pkt,
-                                         AVRational{vmeta.time_base_num, vmeta.time_base_den},
-                                         vstream->time_base);
-                } else {
-                    pkt.stream_index = astream->index;
-                    av_packet_rescale_ts(&pkt,
-                                         AVRational{ameta.time_base_num, ameta.time_base_den},
-                                         astream->time_base);
-                }
-                if (av_interleaved_write_frame(ofmt_ctx, &pkt) < 0) {
+                if (!mp4_writer.write_packet(item)) {
                     logger->warn("failed to write one packet");
                 }
                 last_seq = item->seq;
@@ -205,11 +121,7 @@ int main(int argc, char** argv) {
     encoder.stop();
     writer.join();
 
-    av_write_trailer(ofmt_ctx);
-    if (!(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-        avio_closep(&ofmt_ctx->pb);
-    }
-    avformat_free_context(ofmt_ctx);
+    mp4_writer.write_trailer();
 
     audio_provider->stop();
     video_provider->stop();

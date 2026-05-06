@@ -16,16 +16,19 @@ namespace {
 const std::shared_ptr<piguard::infra_log::Logger> logger = 
     piguard::infra_log::LogFactory::getLogger("RecordAudioCli");
 
-/** arecord -l: card 0 / device 6 — sof-hda-dsp DMIC */
-constexpr const char* kAlsaDevice = "hw:1,0";
-constexpr const char* kOutFileName = ".tmp/record.wav";
+/** 默认走 ALSA default（桌面常见）；嵌入式可用 argv 指定 hw:卡,设备，参见 arecord -l */
+constexpr const char* kDefaultAlsaDevice = "default";
+constexpr const char* kDefaultOutRelative = ".tmp/record.wav";
 constexpr unsigned kSampleRateHz = 16000;
 constexpr unsigned kChannels = 1;
 
 }  // namespace
 
-int main() {
-    const std::filesystem::path out_path = std::filesystem::current_path() / kOutFileName;
+int main(int argc, char** argv) {
+    const std::string alsa_device = (argc > 1) ? argv[1] : kDefaultAlsaDevice;
+    const std::filesystem::path out_path =
+        (argc > 2) ? std::filesystem::path(argv[2])
+                   : (std::filesystem::current_path() / kDefaultOutRelative);
     if (std::filesystem::exists(out_path)) {
         std::error_code ec;
         if (!std::filesystem::remove(out_path, ec) || ec) {
@@ -48,7 +51,7 @@ int main() {
     }
 
     auto provider = std::make_shared<piguard::capture_audio::AudioCaptureProvider>(
-        std::string(kAlsaDevice), kSampleRateHz, kChannels);
+        alsa_device, kSampleRateHz, kChannels);
 
     RecordingConsumer consumer(provider, "record-cli", std::move(wav));
 
@@ -59,7 +62,7 @@ int main() {
 
     std::thread capture([&]() { consumer.run(); });
 
-    logger->info("recording started, output=" + out_path.string() +
+    logger->info("recording started, alsa=" + alsa_device + ", output=" + out_path.string() +
                  ", press Ctrl+C to stop");
 
     logger->info("waiting stop signal");

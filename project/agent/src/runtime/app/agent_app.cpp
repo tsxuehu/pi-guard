@@ -8,6 +8,7 @@ AgentApp::AgentApp(std::string config_path)
     : config_manager_(std::move(config_path)),
       audio_capture_(audio_queue_),
       motion_detect_(video_queue_, event_queue_),
+      encoder_(nullptr, nullptr),
       file_writer_(event_queue_) {}
 
 AgentApp::~AgentApp() { stop(); }

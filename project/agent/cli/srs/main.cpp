@@ -182,16 +182,17 @@ int main(int argc, char** argv) {
                 pkt.size = static_cast<int>(item->data.size());
                 pkt.pts = item->pts;
                 pkt.dts = item->dts;
-                if (item->key_frame) {
-                    pkt.flags |= AV_PKT_FLAG_KEY;
-                }
 
-                if (item->stream_type == piguard::processing_encoder::EncodedStreamType::kVideo) {
+                if (auto video_pkt = std::dynamic_pointer_cast<piguard::processing_encoder::EncodedVideoPacket>(item)) {
+                    if (video_pkt->key_frame) {
+                        pkt.flags |= AV_PKT_FLAG_KEY;
+                    }
                     pkt.stream_index = vstream->index;
                     av_packet_rescale_ts(&pkt,
                                          AVRational{vmeta.time_base_num, vmeta.time_base_den},
                                          vstream->time_base);
                 } else {
+                    pkt.flags |= AV_PKT_FLAG_KEY;
                     pkt.stream_index = astream->index;
                     av_packet_rescale_ts(&pkt,
                                          AVRational{ameta.time_base_num, ameta.time_base_den},
