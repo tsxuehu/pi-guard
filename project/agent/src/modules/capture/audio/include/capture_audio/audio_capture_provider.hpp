@@ -2,7 +2,6 @@
 
 #include "audio_frame.hpp"
 
-#include <atomic>
 #include <condition_variable>
 #include <list>
 #include <memory>
@@ -42,8 +41,8 @@ public:
     AudioCaptureProvider(const AudioCaptureProvider&) = delete;
     AudioCaptureProvider& operator=(const AudioCaptureProvider&) = delete;
 
-    /** 启动 ALSA 采集线程 */
-    bool start();
+    /** 启动 ALSA 采集线程；初始化失败抛 std::runtime_error。 */
+    void start();
 
     /**
      * 停止采集并清理资源
@@ -70,7 +69,10 @@ public:
 
 private:
     void produce_loop();
-    // 需在持有 queue_mtx_ 时调用；按模式清理消费者 pending 并回收空节点。
+    void report_start_result(bool ok);
+    // 在 state_mtx_ 下置 running_=false 并唤醒等待者；返回此前是否处于运行态。
+    bool mark_stopped();
+    // 需在持有 state_mtx_ 时调用；按模式清理消费者 pending 并回收空节点。
     void cleanup_consumer_pending_locked(consumer_id_t id, uint64_t last_seq, bool clear_all);
 
 private:
@@ -79,16 +81,24 @@ private:
     unsigned int channels_;
     const size_t max_queue_capacity_ = 50; // 约 1 秒的缓冲区
 
-    std::atomic<bool> running_{false};
+    // state_mtx_ 保护下方所有共享状态：running_/queue_/active_consumers_/next_seq_ 等。
+    // state_cv_ 在「有新帧可取」或「停止」时被通知，谓词读到的状态与本锁一致。
+    std::mutex state_mtx_;
+    std::condition_variable state_cv_;
+
+    bool running_{false};
     std::thread produce_thread_;
-    
+
+    std::mutex start_mtx_;
+    std::condition_variable start_cv_;
+    bool start_reported_{false};
+    bool start_ok_{false};
+
     uint64_t next_seq_ = 0;
     consumer_id_t next_consumer_id_ = 0;
-    std::set<consumer_id_t> active_consumers_; 
-    
+    std::set<consumer_id_t> active_consumers_;
+
     std::list<queued_audio> queue_;
-    std::mutex queue_mtx_;
-    std::condition_variable queue_cv_;
 
 };
 

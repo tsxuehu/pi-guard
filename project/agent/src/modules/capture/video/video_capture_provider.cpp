@@ -10,6 +10,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -44,9 +45,18 @@ VideoCaptureProvider::~VideoCaptureProvider() {
 }
 
 void VideoCaptureProvider::start() {
-    if (running_.exchange(true)) {
-        logger->debug("start called while already running");
-        return;
+    {
+        std::lock_guard lock(state_mtx_);
+        if (running_) {
+            logger->debug("start called while already running");
+            return;
+        }
+        running_ = true;
+    }
+    {
+        std::lock_guard lock(start_mtx_);
+        start_reported_ = false;
+        start_ok_ = false;
     }
     logger->info("starting video capture thread, device=" + device_ +
                  ", fps=" + std::to_string(capture_fps_) +
@@ -55,11 +65,25 @@ void VideoCaptureProvider::start() {
                  ", buffer_count=" + std::to_string(buffer_count_) +
                  ", max_capacity=" + std::to_string(max_capacity_));
     cap_thread_ = std::thread(&VideoCaptureProvider::produce_loop, this);
+
+    bool started = false;
+    {
+        std::unique_lock lock(start_mtx_);
+        start_cv_.wait(lock, [this] { return start_reported_; });
+        started = start_ok_;
+    }
+    if (!started) {
+        if (cap_thread_.joinable()) {
+            cap_thread_.join();
+        }
+        throw std::runtime_error("VideoCaptureProvider: failed to start V4L2 capture device " + device_);
+    }
 }
 
 void VideoCaptureProvider::stop() {
     // 幂等：重复 stop 只保证线程被 join，不再重复 V4L2/stream 清理。
-    if (!running_.exchange(false)) {
+    const bool was_running = mark_stopped();
+    if (!was_running) {
         logger->debug("stop called while already stopped");
         if (cap_thread_.joinable()) {
             cap_thread_.join();
@@ -67,11 +91,6 @@ void VideoCaptureProvider::stop() {
         return;
     }
     logger->info("stopping video capture, device=" + device_);
-    // 须在 mtx_ 下 notify：避免消费者在「谓词为假、尚未进入 wait」时通知已发出而丢失唤醒。
-    {
-        std::lock_guard lock(mtx_);
-        queue_cv_.notify_all();
-    }
     stream_off();
     if (cap_thread_.joinable()) {
         cap_thread_.join();
@@ -104,7 +123,7 @@ bool VideoCaptureProvider::init_v4l2_capture() {
 }
 
 VideoCaptureProvider::consumer_id_t VideoCaptureProvider::register_consumer() {
-    std::lock_guard lock(mtx_);
+    std::lock_guard lock(state_mtx_);
     const consumer_id_t id = next_consumer_id_++;
     consumers_.insert(id);
     logger->debug("registered consumer id=" + std::to_string(id));
@@ -134,10 +153,10 @@ void VideoCaptureProvider::cleanup_consumer_pending_locked(
 }
 
 void VideoCaptureProvider::unregister_consumer(consumer_id_t consumer_id) {
-    std::lock_guard lock(mtx_);
+    std::lock_guard lock(state_mtx_);
     consumers_.erase(consumer_id);
     cleanup_consumer_pending_locked(consumer_id, 0, true);
-    queue_cv_.notify_all();
+    state_cv_.notify_all();
     logger->debug("unregistered consumer id=" + std::to_string(consumer_id));
 }
 
@@ -291,17 +310,21 @@ void VideoCaptureProvider::produce_loop() {
     logger->info("video capture produce loop entered");
     if (!init_v4l2_capture()) {
         logger->error("V4L2 init failed, produce loop exits early");
-        running_ = false;
-        {
-            std::lock_guard lock(mtx_);
-            queue_cv_.notify_all();
-        }
+        report_start_result(false);
+        (void)mark_stopped();
         return;
     }
+    report_start_result(true);
 
     uint64_t dqbuf_error_count = 0;
     uint64_t dropped_frames = 0;
-    while (running_) {
+    while (true) {
+        {
+            std::lock_guard lock(state_mtx_);
+            if (!running_) {
+                break;
+            }
+        }
         // 从驱动出队一帧；失败时让出时间片并继续重试。
         struct v4l2_buffer buf{};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -311,8 +334,11 @@ void VideoCaptureProvider::produce_loop() {
             const int dqbuf_errno = errno;
             // stop() 通过 STREAMOFF 唤醒此处阻塞的 DQBUF，内核会以 EINVAL/EPIPE 返回。
             // 这是预期的关闭路径，不应作为告警上报。
-            if (!running_.load(std::memory_order_acquire)) {
-                break;
+            {
+                std::lock_guard lock(state_mtx_);
+                if (!running_) {
+                    break;
+                }
             }
             // 持续失败时仅按指数节奏告警，避免高频刷屏。
             if ((dqbuf_error_count & (dqbuf_error_count - 1)) == 0) {
@@ -347,7 +373,7 @@ void VideoCaptureProvider::produce_loop() {
         });
 
         {
-            std::lock_guard lock(mtx_); // C++17 CTAD
+            std::lock_guard lock(state_mtx_); // C++17 CTAD
             QueuedFrame item;
             item.frame = std::move(frame);
             item.pending_consumers = consumers_;
@@ -365,16 +391,33 @@ void VideoCaptureProvider::produce_loop() {
                 }
             }
         }
-        queue_cv_.notify_all();
+        state_cv_.notify_all();
     }
     logger->info("video capture produce loop exiting, total_dropped=" +
                  std::to_string(dropped_frames));
 }
 
+void VideoCaptureProvider::report_start_result(bool ok) {
+    {
+        std::lock_guard lock(start_mtx_);
+        start_ok_ = ok;
+        start_reported_ = true;
+    }
+    start_cv_.notify_all();
+}
+
+bool VideoCaptureProvider::mark_stopped() {
+    std::lock_guard lock(state_mtx_);
+    const bool was_running = running_;
+    running_ = false;
+    state_cv_.notify_all();
+    return was_running;
+}
+
 std::vector<std::shared_ptr<VideoFrame>> VideoCaptureProvider::wait_frame(
     consumer_id_t consumer_id, uint64_t last_seq) {
-    std::unique_lock lock(mtx_);
-    queue_cv_.wait(lock, [this, consumer_id, last_seq] {
+    std::unique_lock lock(state_mtx_);
+    state_cv_.wait(lock, [this, consumer_id, last_seq] {
         if (!running_) {
             return true;
         }

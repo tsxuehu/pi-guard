@@ -55,10 +55,7 @@ int main(int argc, char** argv) {
 
     RecordingConsumer consumer(provider, "record-cli", std::move(wav));
 
-    if (!provider->start()) {
-        logger->error("provider start failed");
-        return 1;
-    }
+    provider->start();
 
     std::thread capture([&]() { consumer.run(); });
 

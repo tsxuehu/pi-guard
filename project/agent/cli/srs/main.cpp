@@ -68,12 +68,8 @@ int main(int argc, char** argv) {
     piguard::processing_encoder::Encoder encoder(video_adapter, audio_adapter, options);
 
     video_provider->start();
-    if (!audio_provider->start()) {
-        logger->error("audio provider start failed");
-        video_provider->stop();
-        avformat_network_deinit();
-        return 1;
-    }
+    audio_provider->start();
+   
     if (!encoder.start()) {
         logger->error("encoder start failed");
         audio_provider->stop();

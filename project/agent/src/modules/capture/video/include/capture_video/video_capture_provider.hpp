@@ -5,7 +5,6 @@
 #include <deque>
 #include <mutex>
 #include <condition_variable>
-#include <atomic>
 #include <thread>
 #include <string>
 #include <unordered_set>
@@ -74,6 +73,10 @@ private:
     void close_fd() noexcept;
     // 采集线程主循环：DQBUF -> 生成帧 -> 入队分发 -> 引用释放时 QBUF。
     void produce_loop();
+    // 上报异步启动结果，供 start() 同步等待。
+    void report_start_result(bool ok);
+    // 在 state_mtx_ 下置 running_=false 并唤醒等待者；返回此前是否处于运行态。
+    bool mark_stopped();
     // 要求调用方已持锁；将消费者从所有帧的 pending 集合移除。
     void remove_consumer_from_pending_locked(consumer_id_t consumer_id);
     // 要求调用方已持锁；按模式移除消费者 pending 并回收已完成帧。
@@ -88,14 +91,18 @@ private:
     size_t max_capacity_;                  // 分发队列最大帧数，超出时丢弃最旧帧
     uint64_t global_seq_{0};               // 全局递增帧序号，标识帧先后顺序
     consumer_id_t next_consumer_id_{1};    // 下一个消费者 ID 生成器
-    std::atomic<bool> running_{false};     // 采集线程运行标志（start/stop 共享）
+    bool running_{false};                  // 采集线程运行标志（由 state_mtx_ 保护）
     bool stream_on_{false};                // v4l2 stream 是否已开启，避免重复 STREAMOFF
     std::vector<MMapBuffer> mmap_buffers_;// mmap 缓冲区信息；按 v4l2 buffer index 索引
     std::unordered_set<consumer_id_t> consumers_; // 当前已注册消费者集合
     std::deque<QueuedFrame> queue_;        // 帧分发队列；每帧记录待消费的消费者集合
-    std::mutex mtx_;                       // 保护消费者集合与队列等共享状态
-    std::condition_variable queue_cv_;     // 帧到达/停止时唤醒等待中的消费者
+    std::mutex state_mtx_;                 // 保护消费者集合与队列等共享状态
+    std::condition_variable state_cv_;     // 帧到达/停止时唤醒等待中的消费者
     std::thread cap_thread_;               // 后台采集线程（DQBUF -> 入队 -> 通知）
+    std::mutex start_mtx_;                 // 保护启动握手状态
+    std::condition_variable start_cv_;     // 通知 start() 线程启动结果
+    bool start_reported_{false};           // 采集线程是否已回传启动结果
+    bool start_ok_{false};                 // 采集线程启动是否成功
 };
 
 }  // namespace piguard::capture_video

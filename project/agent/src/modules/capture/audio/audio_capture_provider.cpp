@@ -36,40 +36,61 @@ AudioCaptureProvider::~AudioCaptureProvider() {
     stop();
 }
 
-bool AudioCaptureProvider::start() {
-    if (running_.exchange(true)) {
-        logger->debug("start called while already running");
-        return true;
+void AudioCaptureProvider::start() {
+    {
+        std::lock_guard<std::mutex> lock(state_mtx_);
+        if (running_) {
+            logger->debug("start called while already running");
+            return;
+        }
+        running_ = true;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(start_mtx_);
+        start_reported_ = false;
+        start_ok_ = false;
     }
 
     logger->info("starting audio capture thread, device=" + device_ +
                  ", sample_rate=" + std::to_string(sample_rate_) +
                  ", channels=" + std::to_string(channels_));
     produce_thread_ = std::thread(&AudioCaptureProvider::produce_loop, this);
-    return true;
-}
 
-void AudioCaptureProvider::stop() {
-    if (!running_.exchange(false)) {
-        logger->debug("stop called while already stopped");
+    bool started = false;
+    {
+        std::unique_lock<std::mutex> lock(start_mtx_);
+        start_cv_.wait(lock, [this] { return start_reported_; });
+        started = start_ok_;
+    }
+
+    if (!started) {
         if (produce_thread_.joinable()) {
             produce_thread_.join();
         }
-        return;
+        throw std::runtime_error("AudioCaptureProvider: failed to start ALSA capture device " + device_);
     }
-    // stop 同时负责发停止信号、唤醒等待者并回收采集线程。
-    // 须在 queue_mtx_ 下 notify：避免等待者在「谓词为假、尚未进入 wait」时已发出通知而丢失唤醒。
-    {
-        std::lock_guard<std::mutex> lock(queue_mtx_);
-        queue_cv_.notify_all();
+}
+
+void AudioCaptureProvider::stop() {
+    if (!mark_stopped()) {
+        logger->debug("stop called while already stopped");
     }
     if (produce_thread_.joinable()) {
         produce_thread_.join();
     }
 }
 
+bool AudioCaptureProvider::mark_stopped() {
+    std::lock_guard<std::mutex> lock(state_mtx_);
+    const bool was_running = running_;
+    running_ = false;
+    state_cv_.notify_all();
+    return was_running;
+}
+
 AudioCaptureProvider::consumer_id_t AudioCaptureProvider::register_consumer() {
-    std::lock_guard<std::mutex> lock(queue_mtx_);
+    std::lock_guard<std::mutex> lock(state_mtx_);
     consumer_id_t id = next_consumer_id_++;
     active_consumers_.insert(id);
     logger->debug("registered consumer id=" + std::to_string(id));
@@ -77,7 +98,7 @@ AudioCaptureProvider::consumer_id_t AudioCaptureProvider::register_consumer() {
 }
 
 void AudioCaptureProvider::unregister_consumer(consumer_id_t id) {
-    std::lock_guard<std::mutex> lock(queue_mtx_);
+    std::lock_guard<std::mutex> lock(state_mtx_);
     active_consumers_.erase(id);
     logger->debug("unregistered consumer id=" + std::to_string(id));
 
@@ -85,10 +106,10 @@ void AudioCaptureProvider::unregister_consumer(consumer_id_t id) {
 }
 
 std::vector<std::shared_ptr<AudioFrame>> AudioCaptureProvider::wait_audio(consumer_id_t id, uint64_t last_seq) {
-    std::unique_lock<std::mutex> lock(queue_mtx_);
+    std::unique_lock<std::mutex> lock(state_mtx_);
 
-    queue_cv_.wait(lock, [this, id, last_seq] {
-        if (!running_.load(std::memory_order_acquire)) {
+    state_cv_.wait(lock, [this, id, last_seq] {
+        if (!running_) {
             return true;
         }
         for (const auto& item : queue_) {
@@ -99,7 +120,7 @@ std::vector<std::shared_ptr<AudioFrame>> AudioCaptureProvider::wait_audio(consum
         return false;
     });
 
-    if (!running_.load(std::memory_order_acquire) ||
+    if (!running_ ||
         queue_.empty() ||
         active_consumers_.count(id) == 0) {
         return {};
@@ -137,6 +158,15 @@ void AudioCaptureProvider::cleanup_consumer_pending_locked(
     }
 }
 
+void AudioCaptureProvider::report_start_result(bool ok) {
+    {
+        std::lock_guard<std::mutex> lock(start_mtx_);
+        start_ok_ = ok;
+        start_reported_ = true;
+    }
+    start_cv_.notify_all();
+}
+
 void AudioCaptureProvider::produce_loop() {
     snd_pcm_t* handle = nullptr;
     logger->info("opening ALSA capture device: " + device_);
@@ -144,11 +174,8 @@ void AudioCaptureProvider::produce_loop() {
     const int open_ret = snd_pcm_open(&handle, device_.c_str(), SND_PCM_STREAM_CAPTURE, 0);
     if (open_ret < 0) {
         logger->error("failed to open ALSA device " + device_ + ": " + snd_strerror(open_ret));
-        running_ = false;
-        {
-            std::lock_guard<std::mutex> lock(queue_mtx_);
-            queue_cv_.notify_all();
-        }
+        mark_stopped();
+        report_start_result(false);
         return;
     }
 
@@ -161,12 +188,9 @@ void AudioCaptureProvider::produce_loop() {
                                            50000);
     if (set_ret < 0) {
         logger->error("failed to set ALSA params: " + std::string(snd_strerror(set_ret)));
-        running_ = false;
         (void)snd_pcm_close(handle);
-        {
-            std::lock_guard<std::mutex> lock(queue_mtx_);
-            queue_cv_.notify_all();
-        }
+        mark_stopped();
+        report_start_result(false);
         return;
     }
 
@@ -177,28 +201,27 @@ void AudioCaptureProvider::produce_loop() {
     const int start_ret = snd_pcm_start(handle);
     if (start_ret < 0) {
         logger->error("snd_pcm_start failed: " + std::string(snd_strerror(start_ret)));
-        running_ = false;
         (void)snd_pcm_close(handle);
-        {
-            std::lock_guard<std::mutex> lock(queue_mtx_);
-            queue_cv_.notify_all();
-        }
+        mark_stopped();
+        report_start_result(false);
         return;
     }
     logger->info("ALSA capture initialized");
+    report_start_result(true);
 
     const unsigned frame_size =
         (sample_rate_ > 0) ? (sample_rate_ * 20u / 1000u) : 320u;
     std::vector<int16_t> buffer(static_cast<size_t>(frame_size) * channels_);
 
-    while (running_.load(std::memory_order_acquire)) {
-        const int pcm_readi_ret = snd_pcm_readi(handle, buffer.data(), frame_size);
-
-        if (!running_.load(std::memory_order_acquire)) {
-            logger->info("snd_pcm_readi returned after running_ set to false, pcm_readi_ret=" +
-                         std::to_string(pcm_readi_ret));
-            break;
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(state_mtx_);
+            if (!running_) {
+                break;
+            }
         }
+
+        const int pcm_readi_ret = snd_pcm_readi(handle, buffer.data(), frame_size);
 
         if (pcm_readi_ret < 0) {
             // snd_pcm_recover 统一处理 EPIPE/ESTRPIPE/EINTR 等，必要时 prepare/resume；
@@ -219,14 +242,23 @@ void AudioCaptureProvider::produce_loop() {
         af->pcm_data.assign(buffer.begin(), buffer.begin() + pcm_period_frames * channels_);
         af->timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
 
+        bool dropped_after_stop = false;
         {
-            std::lock_guard<std::mutex> lock(queue_mtx_);
-            queue_.push_back({af, active_consumers_});
+            std::lock_guard<std::mutex> lock(state_mtx_);
+            if (!running_) {
+                dropped_after_stop = true;
+            } else {
+                queue_.push_back({af, active_consumers_});
 
-            if (queue_.size() > max_queue_capacity_) {
-                queue_.pop_front();
+                if (queue_.size() > max_queue_capacity_) {
+                    queue_.pop_front();
+                }
+                state_cv_.notify_all();
             }
-            queue_cv_.notify_all();
+        }
+        if (dropped_after_stop) {
+            logger->info("dropping captured audio frame after running_ set to false");
+            break;
         }
     }
     logger->info("capture loop observed running=false, leaving read loop");
