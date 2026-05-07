@@ -8,6 +8,7 @@
 #include "processing_encoder/video_provider_adapter.hpp"
 
 #include <atomic>
+#include <exception>
 #include <csignal>
 #include <cstdint>
 #include <cstring>
@@ -69,14 +70,8 @@ int main(int argc, char** argv) {
 
     video_provider->start();
     audio_provider->start();
-   
-    if (!encoder.start()) {
-        logger->error("encoder start failed");
-        audio_provider->stop();
-        video_provider->stop();
-        avformat_network_deinit();
-        return 1;
-    }
+
+    encoder.start();
 
     AVFormatContext* ofmt_ctx = nullptr;
     if (avformat_alloc_output_context2(&ofmt_ctx, nullptr, "flv", rtmp_url.c_str()) < 0 || ofmt_ctx == nullptr) {

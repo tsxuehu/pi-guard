@@ -10,6 +10,7 @@
 #include "mp4_writer.hpp"
 
 #include <atomic>
+#include <exception>
 #include <csignal>
 #include <cstdint>
 #include <memory>
@@ -63,13 +64,8 @@ int main(int argc, char** argv) {
 
     video_provider->start();
     audio_provider->start();
-    
-    if (!encoder.start()) {
-        logger->error("encoder start failed");
-        audio_provider->stop();
-        video_provider->stop();
-        return 1;
-    }
+
+    encoder.start();
 
     const auto vmeta = encoder.video_stream_meta();
     const auto ameta = encoder.audio_stream_meta();

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
 #include <utility>
 
 #include "capture_audio/audio_frame.hpp"
@@ -113,7 +114,7 @@ bool Encoder::init_video_encoder() {
     }
 
     {
-        std::lock_guard<std::mutex> lock(packet_mtx_);
+        std::lock_guard<std::mutex> lock(state_mtx_);
         video_meta_.ready = true;
         video_meta_.codec_id = video_ctx_->codec_ctx->codec_id;
         video_meta_.time_base_num = video_ctx_->codec_ctx->time_base.num;
@@ -200,7 +201,7 @@ bool Encoder::init_audio_encoder() {
     }
 
     {
-        std::lock_guard<std::mutex> lock(packet_mtx_);
+        std::lock_guard<std::mutex> lock(state_mtx_);
         audio_meta_.ready = true;
         audio_meta_.codec_id = audio_ctx_->codec_ctx->codec_id;
         audio_meta_.time_base_num = audio_ctx_->codec_ctx->time_base.num;
@@ -258,18 +259,23 @@ void Encoder::close_audio_encoder() {
     audio_ctx_.reset();
 }
 
-bool Encoder::start() {
-    if (running_.exchange(true)) {
-        logger->debug("encoder already running");
-        return true;
+void Encoder::start() {
+    {
+        std::lock_guard<std::mutex> lock(state_mtx_);
+        if (running_) {
+            logger->debug("encoder already running");
+            return;
+        }
+        running_ = true;
     }
+
     audio_pcm_buf_.clear();
     if (!init_video_encoder() || !init_audio_encoder()) {
         logger->error("encoder init failed");
-        running_.store(false);
+        mark_stopped();
         close_video_encoder();
         close_audio_encoder();
-        return false;
+        throw std::runtime_error("Encoder: failed to initialize encoders");
     }
 
     if (video_getter_) {
@@ -279,7 +285,6 @@ bool Encoder::start() {
         audio_thread_ = std::thread(&Encoder::audio_encode_loop, this);
     }
     logger->info("encoder started");
-    return true;
 }
 
 void Encoder::flush_video_encoder() {
@@ -316,11 +321,10 @@ void Encoder::flush_audio_encoder() {
 }
 
 void Encoder::stop() {
-    if (!running_.exchange(false)) {
+    if (!mark_stopped()) {
         return;
     }
 
-    packet_cv_.notify_all();
     if (video_thread_.joinable()) {
         video_thread_.join();
     }
@@ -335,9 +339,23 @@ void Encoder::stop() {
     logger->info("encoder stopped");
 }
 
+bool Encoder::mark_stopped() {
+    std::lock_guard<std::mutex> lock(state_mtx_);
+    const bool was_running = running_;
+    running_ = false;
+    state_cv_.notify_all();
+    return was_running;
+}
+
 void Encoder::video_encode_loop() {
     bool first_frame = true;
-    while (running_.load(std::memory_order_acquire)) {
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(state_mtx_);
+            if (!running_) {
+                break;
+            }
+        }
         auto frames = video_getter_->fetch_frames();
         if (frames.empty() || !video_ctx_) {
             continue;
@@ -391,7 +409,13 @@ void Encoder::video_encode_loop() {
 
 void Encoder::audio_encode_loop() {
     bool first_frame = true;
-    while (running_.load(std::memory_order_acquire)) {
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(state_mtx_);
+            if (!running_) {
+                break;
+            }
+        }
         auto frames = audio_getter_->fetch_frames();
         if (frames.empty() || !audio_ctx_) {
             continue;
@@ -461,7 +485,7 @@ void Encoder::audio_encode_loop() {
 }
 
 void Encoder::enqueue_packet(std::shared_ptr<EncodedPacketBase> packet) {
-    std::lock_guard<std::mutex> lock(packet_mtx_);
+    std::lock_guard<std::mutex> lock(state_mtx_);
     packet->seq = ++packet_seq_;
     packet_queue_.push_back({std::move(packet), consumers_});
 
@@ -469,11 +493,11 @@ void Encoder::enqueue_packet(std::shared_ptr<EncodedPacketBase> packet) {
         packet_queue_.pop_front();
         logger->warn("packet queue overflow, dropped oldest packet");
     }
-    packet_cv_.notify_all();
+    state_cv_.notify_all();
 }
 
 Encoder::consumer_id_t Encoder::register_consumer() {
-    std::lock_guard<std::mutex> lock(packet_mtx_);
+    std::lock_guard<std::mutex> lock(state_mtx_);
     const consumer_id_t id = next_consumer_id_++;
     consumers_.insert(id);
     return id;
@@ -495,16 +519,16 @@ void Encoder::cleanup_consumer_pending_locked(consumer_id_t consumer_id, uint64_
 }
 
 void Encoder::unregister_consumer(consumer_id_t consumer_id) {
-    std::lock_guard<std::mutex> lock(packet_mtx_);
+    std::lock_guard<std::mutex> lock(state_mtx_);
     consumers_.erase(consumer_id);
     cleanup_consumer_pending_locked(consumer_id, 0, true);
-    packet_cv_.notify_all();
+    state_cv_.notify_all();
 }
 
 std::vector<std::shared_ptr<EncodedPacketBase>> Encoder::wait_packet(consumer_id_t consumer_id, uint64_t last_seq) {
-    std::unique_lock<std::mutex> lock(packet_mtx_);
-    packet_cv_.wait(lock, [this, consumer_id, last_seq] {
-        if (!running_.load(std::memory_order_acquire)) {
+    std::unique_lock<std::mutex> lock(state_mtx_);
+    state_cv_.wait(lock, [this, consumer_id, last_seq] {
+        if (!running_) {
             return true;
         }
         for (const auto& item : packet_queue_) {
@@ -515,7 +539,7 @@ std::vector<std::shared_ptr<EncodedPacketBase>> Encoder::wait_packet(consumer_id
         return false;
     });
 
-    if ((!running_.load(std::memory_order_acquire) && packet_queue_.empty()) ||
+    if ((!running_ && packet_queue_.empty()) ||
         consumers_.count(consumer_id) == 0) {
         return {};
     }
@@ -534,18 +558,21 @@ std::vector<std::shared_ptr<EncodedPacketBase>> Encoder::wait_packet(consumer_id
 }
 
 EncodedVideoStreamMeta Encoder::video_stream_meta() const {
-    std::lock_guard<std::mutex> lock(packet_mtx_);
+    std::lock_guard<std::mutex> lock(state_mtx_);
     return video_meta_;
 }
 
 EncodedAudioStreamMeta Encoder::audio_stream_meta() const {
-    std::lock_guard<std::mutex> lock(packet_mtx_);
+    std::lock_guard<std::mutex> lock(state_mtx_);
     return audio_meta_;
 }
 
 void Encoder::encode_once() {
-    if (!running_.load(std::memory_order_acquire)) {
-        return;
+    {
+        std::lock_guard<std::mutex> lock(state_mtx_);
+        if (!running_) {
+            return;
+        }
     }
     // 实时编码由独立线程驱动，此接口保留给兼容旧调用方。
 }

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -26,7 +25,7 @@ public:
     Encoder(const Encoder&) = delete;
     Encoder& operator=(const Encoder&) = delete;
 
-    bool start();
+    void start();
     void stop();
     void encode_once();
 
@@ -52,8 +51,9 @@ private:
     void flush_video_encoder();
     void flush_audio_encoder();
     void cleanup_consumer_pending_locked(consumer_id_t consumer_id, uint64_t last_seq, bool clear_all);
+    // 在 state_mtx_ 下置 running_=false 并唤醒等待者；返回此前是否处于运行态。
+    bool mark_stopped();
 
-    std::atomic<bool> running_{false};
     std::shared_ptr<IVideoFrameGetter> video_getter_;
     std::shared_ptr<IAudioFrameGetter> audio_getter_;
     EncoderOptions options_;
@@ -61,12 +61,16 @@ private:
     std::thread video_thread_;
     std::thread audio_thread_;
 
+    // state_mtx_ 保护下方所有共享状态：running_/packet_queue_/consumers_ 等。
+    // state_cv_ 在「有新包可取」或「停止」时被通知，谓词读到的状态与本锁一致。
+    mutable std::mutex state_mtx_;
+    std::condition_variable state_cv_;
+
+    bool running_{false};
     uint64_t packet_seq_{0};
     consumer_id_t next_consumer_id_{1};
     std::unordered_set<consumer_id_t> consumers_;
     std::deque<QueuedPacket> packet_queue_;
-    mutable std::mutex packet_mtx_;
-    std::condition_variable packet_cv_;
     EncodedVideoStreamMeta video_meta_;
     EncodedAudioStreamMeta audio_meta_;
 
