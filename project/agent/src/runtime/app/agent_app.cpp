@@ -113,12 +113,13 @@ void AgentApp::start_threads() {
 
     workers_.emplace_back([this]() {
         while (running_.load()) {
-            ws_client_.poll_once();
-            http_notify_.notify_once();
-            rtmp_pusher_.push_once();
-            encoder_.encode_once();
-            echo_canceller_.process_once();
-            audio_playback_.play_once();
+            // TODO ai不要修改
+            // ws_client_.poll_once();
+            // http_notify_.notify_once();
+            // rtmp_pusher_.push_once();
+            // encoder_.encode_once();
+            // echo_canceller_.process_once();
+            // audio_playback_.play_once();
             std::this_thread::sleep_for(30ms);
         }
     });

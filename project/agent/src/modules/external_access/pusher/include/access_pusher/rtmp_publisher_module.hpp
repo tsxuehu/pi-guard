@@ -7,7 +7,7 @@
 
 namespace piguard::external_access {
 
-class RTMPPusher : public foundation::Module {
+class RTMPPusherModule : public foundation::Module {
 public:
     std::string name() const override;
     bool start() override;

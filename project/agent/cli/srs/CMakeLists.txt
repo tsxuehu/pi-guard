@@ -5,6 +5,7 @@ pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
 
 add_executable(srs-push-demo
     main.cpp
+    srs_rtmp_pusher.cpp
 )
 
 target_link_libraries(srs-push-demo

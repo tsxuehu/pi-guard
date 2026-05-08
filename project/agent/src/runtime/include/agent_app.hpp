@@ -11,7 +11,7 @@
 #include "foundation/thread_safe_queue.hpp"
 #include "foundation/types.hpp"
 #include "access_http/http_notify.hpp"
-#include "access_pusher/rtmp_pusher.hpp"
+#include "access_pusher/rtmp_publisher_module.hpp"
 #include "access_websocket/websocket_client.hpp"
 #include "infra_config/config_manager.hpp"
 #include "infra_event/event_bus.hpp"
@@ -62,7 +62,7 @@ private:
     output::FileWriter file_writer_;
     output::AudioPlayback audio_playback_;
 
-    external_access::RTMPPusher rtmp_pusher_;
+    external_access::RTMPPusherModule rtmp_pusher_;
     external_access::HTTPNotify http_notify_;
     external_access::WebSocketClient ws_client_;
 };
