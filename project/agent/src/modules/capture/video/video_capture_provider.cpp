@@ -10,6 +10,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -353,6 +354,8 @@ void VideoCaptureProvider::produce_loop() {
 
         auto frame = std::make_shared<VideoFrame>();
         frame->seq = ++global_seq_;
+        frame->timestamp_ns = static_cast<uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count());
         frame->data = (buf.index < mmap_buffers_.size()) ? mmap_buffers_[buf.index].start : nullptr;
         frame->length = buf.bytesused;
 

@@ -98,6 +98,8 @@ struct Encoder::VideoCodecContext {
     AVPacket* packet{nullptr};
     SwsContext* sws_ctx{nullptr};
     int64_t pts{0};
+    uint64_t first_seq{0};       // 首个编码帧的采集序号，用于 PTS 校准
+    bool first_frame{true};      // 是否为首个编码帧
 };
 ```
 
@@ -154,7 +156,9 @@ while (running_) {
 
     av_frame_make_writable()
     sws_scale(YUYV422 → YUV420P)          ← 格式转换
-    frame->pts = pts++
+    // 基于帧采集序号计算 PTS，避免丢帧导致时间轴偏移
+    if first_frame → 记录采集序号 first_seq
+    frame->pts = video_frame->seq - first_seq
     avcodec_send_frame()                  ← 送入编码器
 
     // 异步模型：一次 send 可能产生 0~N 个包
@@ -254,6 +258,34 @@ ALSA 采集 320 → 缓冲 1280 ≥ 1024 → 编码 1024，余 256
 ### 实时丢帧策略
 
 视频编码线程采用"保留最新帧"策略：`fetch_frames()` 返回多帧时，只取 `frames.back()` 编码，其余丢弃。视频与音频不同 — 积压的视频帧是"过去"的画面，编码出来也无意义。
+
+#### 丢帧导致的音画同步问题
+
+PTS 不能使用简单的编码递增计数器（`pts++`），否则丢帧会导致视频时间轴偏移：
+
+```
+录制 4 秒，25fps 采集 100 帧，但编码器只能处理 60 帧（丢 40 帧）：
+
+  视频 PTS = 0, 1, 2, ..., 59   → 代表 59/25 = 2.36 秒
+  音频 PTS = 0, 1024, ..., 64000 → 代表 64000/16000 = 4.0 秒
+  视频比音频慢 1.64 秒！
+```
+
+#### 解决方案：基于采集序号校准 PTS
+
+利用 `VideoFrame::seq`（V4L2 每采集一帧全局 +1 的序列号）替代编码计数器：
+
+```cpp
+// 首帧记录基准序号
+if (video_ctx_->first_frame) {
+    video_ctx_->first_seq = video_frame->seq;
+    video_ctx_->first_frame = false;
+}
+// PTS = 采集序号偏移量，精确反映该帧在时间轴上的真实位置
+video_ctx_->frame->pts = static_cast<int64_t>(video_frame->seq - video_ctx_->first_seq);
+```
+
+25fps 下 `time_base = {1, 25}`，每帧的采集间隔正好对应 1 个 PTS 单位。无论中间丢弃多少帧，保留下来的帧的 PTS 始终正确反映它被采集的真实时刻。音频侧所有 PCM 采样都被累积编码，PTS 逐样递增，天然准确。两者从同一时刻启动，以各自 time_base 表达同一物理时间线，MP4 容器即可正确对齐。`av_interleaved_write_frame()` 会按 PTS 交错了音视频包，确保最终文件播放时声音与画面同步。
 
 ### send/receive 异步模型
 

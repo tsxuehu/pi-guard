@@ -9,6 +9,7 @@
 #include "srs_config.hpp"
 #include "srs_rtmp_pusher.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <csignal>
 #include <cstdint>
@@ -103,9 +104,12 @@ int main(int argc, char** argv) {
             if (packets.empty()) {
                 continue;
             }
+            uint64_t batch_max_seq = last_seq;
             for (const auto& packet : packets) {
                 rtmp_pusher.write_packet(packet);
+                batch_max_seq = std::max(batch_max_seq, packet->seq);
             }
+            last_seq = batch_max_seq;
         }
     });
     

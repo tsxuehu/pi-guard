@@ -1,6 +1,7 @@
 #include "srs_rtmp_pusher.hpp"
 #include "foundation/shutdown_manager.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 
@@ -96,7 +97,9 @@ void SrsRtmpPusher::start() {
     }
 
     logger_->info("rtmp push started, url=" + rtmp_url_);
-    
+
+    next_video_pts_ = 0;
+    next_audio_pts_ = 0;
     running_ = true;
 }
 
@@ -136,10 +139,19 @@ void SrsRtmpPusher::write_packet(const std::shared_ptr<processing_encoder::Encod
     AVPacket pkt{};
     pkt.data = const_cast<uint8_t*>(packet->data.data());
     pkt.size = static_cast<int>(packet->data.size());
-    pkt.pts = packet->pts;
-    pkt.dts = packet->dts;
-    
+
     if (auto video_pkt = std::dynamic_pointer_cast<processing_encoder::EncodedVideoPacket>(packet)) {
+        int64_t pts = packet->pts;
+        int64_t dts = packet->dts;
+        if (pts == AV_NOPTS_VALUE) {
+            pts = next_video_pts_;
+        }
+        if (dts == AV_NOPTS_VALUE) {
+            dts = pts;
+        }
+        next_video_pts_ = std::max(next_video_pts_, pts + 1);
+        pkt.pts = pts;
+        pkt.dts = dts;
         if (video_pkt->key_frame) {
             pkt.flags |= AV_PKT_FLAG_KEY;
         }
@@ -148,6 +160,19 @@ void SrsRtmpPusher::write_packet(const std::shared_ptr<processing_encoder::Encod
                              AVRational{video_meta_.time_base_num, video_meta_.time_base_den},
                              vstream_->time_base);
     } else {
+        int64_t pts = packet->pts;
+        int64_t dts = packet->dts;
+        if (pts == AV_NOPTS_VALUE) {
+            pts = next_audio_pts_;
+        }
+        if (dts == AV_NOPTS_VALUE) {
+            dts = pts;
+        }
+        // 与 Encoder 中 AAC-LC 默认 frame_size（常见为 1024）对齐，供合成时间戳递增。
+        constexpr int k_default_aac_frame_samples = 1024;
+        next_audio_pts_ = std::max(next_audio_pts_, pts + k_default_aac_frame_samples);
+        pkt.pts = pts;
+        pkt.dts = dts;
         pkt.flags |= AV_PKT_FLAG_KEY;
         pkt.stream_index = astream_->index;
         av_packet_rescale_ts(&pkt,

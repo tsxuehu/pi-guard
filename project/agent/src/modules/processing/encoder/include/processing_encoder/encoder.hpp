@@ -80,6 +80,10 @@ private:
     std::unique_ptr<AudioCodecContext> audio_ctx_;
 
     std::vector<int16_t> audio_pcm_buf_;
+    /// Encoder::start 时打点，音视频 PTS 均相对此时刻换算到各自 codec time_base
+    uint64_t program_t0_ns_{0};
+    bool audio_pts_base_initialized_{false};
+    uint64_t audio_pcm_front_epoch_ns_{0};
 };
 
 }  // namespace piguard::processing_encoder

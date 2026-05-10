@@ -3,6 +3,7 @@
 #include "infra_log/logger.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
@@ -12,14 +13,16 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
-#include <libavutil/opt.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/mathematics.h>
+#include <libavutil/opt.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
 namespace {
 const std::shared_ptr<piguard::infra_log::Logger> logger = 
     piguard::infra_log::LogFactory::getLogger("Encoder");
+constexpr int64_t kNanosPerSecond = 1'000'000'000LL;
 }
 namespace piguard::processing_encoder {
 
@@ -28,7 +31,7 @@ struct Encoder::VideoCodecContext {
     AVFrame* frame{nullptr};
     AVPacket* packet{nullptr};
     SwsContext* sws_ctx{nullptr};
-    int64_t pts{0};
+    bool logged_first_encoded_frame{false};
 };
 
 struct Encoder::AudioCodecContext {
@@ -272,6 +275,7 @@ void Encoder::start() {
     }
 
     audio_pcm_buf_.clear();
+    audio_pts_base_initialized_ = false;
     if (!init_video_encoder() || !init_audio_encoder()) {
         logger->error("encoder init failed");
         mark_stopped();
@@ -279,6 +283,9 @@ void Encoder::start() {
         close_audio_encoder();
         throw std::runtime_error("Encoder: failed to initialize encoders");
     }
+
+    program_t0_ns_ =
+        static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
 
     if (video_getter_) {
         video_thread_ = std::thread(&Encoder::video_encode_loop, this);
@@ -350,7 +357,6 @@ bool Encoder::mark_stopped() {
 }
 
 void Encoder::video_encode_loop() {
-    bool first_frame = true;
     while (true) {
         {
             std::lock_guard<std::mutex> lock(state_mtx_);
@@ -386,7 +392,11 @@ void Encoder::video_encode_loop() {
                   video_ctx_->frame->data,
                   video_ctx_->frame->linesize);
 
-        video_ctx_->frame->pts = video_ctx_->pts++;
+        const int fps = std::max(1, options_.video_fps);
+        const int64_t dt_ns = std::max(
+            int64_t{0}, static_cast<int64_t>(video_frame->timestamp_ns) -
+                           static_cast<int64_t>(program_t0_ns_));
+        video_ctx_->frame->pts = av_rescale(dt_ns, fps, kNanosPerSecond);
         if (avcodec_send_frame(video_ctx_->codec_ctx, video_ctx_->frame) < 0) {
             continue;
         }
@@ -402,15 +412,15 @@ void Encoder::video_encode_loop() {
             av_packet_unref(video_ctx_->packet);
         }
 
-        if (first_frame) {
+        if (!video_ctx_->logged_first_encoded_frame) {
             logger->debug("video encode loop: first frame encoded");
-            first_frame = false;
+            video_ctx_->logged_first_encoded_frame = true;
         }
     }
 }
 
 void Encoder::audio_encode_loop() {
-    bool first_frame = true;
+    bool logged_first_encoded = false;
     while (true) {
         {
             std::lock_guard<std::mutex> lock(state_mtx_);
@@ -426,6 +436,9 @@ void Encoder::audio_encode_loop() {
         for (const auto& frame : frames) {
             if (frame == nullptr || frame->pcm_data.empty()) {
                 continue;
+            }
+            if (audio_pcm_buf_.empty()) {
+                audio_pcm_front_epoch_ns_ = frame->timestamp;
             }
             audio_pcm_buf_.insert(audio_pcm_buf_.end(),
                                   frame->pcm_data.begin(),
@@ -457,8 +470,18 @@ void Encoder::audio_encode_loop() {
                 break;
             }
 
+            if (!audio_pts_base_initialized_) {
+                const int64_t epoch_dt =
+                    std::max(int64_t{0}, static_cast<int64_t>(audio_pcm_front_epoch_ns_) -
+                                             static_cast<int64_t>(program_t0_ns_));
+                audio_ctx_->pts =
+                    av_rescale(epoch_dt, options_.audio_sample_rate, kNanosPerSecond);
+                audio_pts_base_initialized_ = true;
+            }
             audio_ctx_->frame->pts = audio_ctx_->pts;
             audio_ctx_->pts += dst_samples;
+            audio_pcm_front_epoch_ns_ +=
+                static_cast<uint64_t>(av_rescale(dst_samples, kNanosPerSecond, options_.audio_sample_rate));
             if (avcodec_send_frame(audio_ctx_->codec_ctx, audio_ctx_->frame) < 0) {
                 logger->warn("audio encode loop: send frame failed, clearing buffer");
                 audio_pcm_buf_.clear();
@@ -478,9 +501,9 @@ void Encoder::audio_encode_loop() {
             audio_pcm_buf_.erase(audio_pcm_buf_.begin(),
                                  audio_pcm_buf_.begin() + dst_total);
 
-            if (first_frame) {
+            if (!logged_first_encoded) {
                 logger->debug("audio encode loop: first frame encoded");
-                first_frame = false;
+                logged_first_encoded = true;
             }
         }
     }

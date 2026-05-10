@@ -39,6 +39,10 @@ private:
     
     std::atomic<bool> running_{false};
     std::mutex writer_mutex_;
+
+    /// 编码器若输出 AV_NOPTS_VALUE，FLV/RTMP 时间戳会非法；在此用单调值补齐。
+    int64_t next_video_pts_{0};
+    int64_t next_audio_pts_{0};
 };
 
 } // namespace piguard::cli::srs
