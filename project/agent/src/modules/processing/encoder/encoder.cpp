@@ -75,6 +75,7 @@ bool Encoder::init_video_encoder() {
     video_ctx_->codec_ctx->bit_rate = options_.video_bitrate;
     video_ctx_->codec_ctx->gop_size = std::max(1, options_.video_fps);
     video_ctx_->codec_ctx->max_b_frames = 0;
+    video_ctx_->codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
     av_opt_set(video_ctx_->codec_ctx->priv_data, "preset", "veryfast", 0);
     av_opt_set(video_ctx_->codec_ctx->priv_data, "tune", "zerolatency", 0);
@@ -158,6 +159,7 @@ bool Encoder::init_audio_encoder() {
         audio_ctx_->codec_ctx->ch_layout = AV_CHANNEL_LAYOUT_STEREO;
     }
     audio_ctx_->codec_ctx->time_base = AVRational{1, options_.audio_sample_rate};
+    audio_ctx_->codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
     if (avcodec_open2(audio_ctx_->codec_ctx, codec, nullptr) < 0) {
         logger->error("failed to open audio encoder");

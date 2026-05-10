@@ -155,8 +155,13 @@ void SrsRtmpPusher::write_packet(const std::shared_ptr<processing_encoder::Encod
                              astream_->time_base);
     }
     
-    if (av_interleaved_write_frame(ofmt_ctx_, &pkt) < 0) {
-        logger_->warn("failed to push one packet");
+    int ret = av_interleaved_write_frame(ofmt_ctx_, &pkt);
+    if (ret < 0) {
+        char errbuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        logger_->warn(std::string("failed to push one packet: ") + errbuf +
+                      " (stream_index=" + std::to_string(pkt.stream_index) +
+                      ", pts=" + std::to_string(pkt.pts) + ")");
     }
 }
 

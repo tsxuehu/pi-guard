@@ -12,7 +12,7 @@ struct Config {
     unsigned audio_channels = 1;
     
     const char* default_video_device = "/dev/video0";
-    const char* default_audio_device = "hw:1,0";
+    const char* default_audio_device = "default";
     const char* default_rtmp_url = "rtmp://127.0.0.1/live/livestream";
 };
 
