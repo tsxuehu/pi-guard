@@ -1,6 +1,9 @@
 #pragma once
 
-namespace piguard::cli::srs {
+#include <cstddef>
+#include <cstdint>
+
+namespace piguard::cli::rtmp_pusher {
 
 struct Config {
     int video_width = 640;
@@ -16,4 +19,4 @@ struct Config {
     const char* default_rtmp_url = "rtmp://127.0.0.1/live/livestream";
 };
 
-} // namespace piguard::cli::srs
+} // namespace piguard::cli::rtmp_pusher
