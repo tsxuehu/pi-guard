@@ -92,7 +92,7 @@ Encoder 接收来自采集层的原始音视频帧：
 
 | 来源 | 数据结构 | 格式 | 关键字段 |
 |---|---|---|---|
-| V4L2 视频采集 | `VideoFrame` | YUYV422（原始像素） | `timestamp_ns`（纳秒级采集时刻）、`seq`（全局序列号）、`data`（内存映射地址） |
+| V4L2 视频采集 | `VideoFrame` | YUYV422（原始像素） | `timestamp_ns`（纳秒级采集时刻）、`seq`（详见 [多消费者方案 4.3 节](./多消费者技术方案.md)）、`data`（内存映射地址） |
 | ALSA 音频采集 | `AudioFrame` | PCM S16_LE（16位有符号小端） | `timestamp_ns`（纳秒级采集时刻）、`seq`、`pcm_data`（交织采样数据） |
 
 ### 3.2 输出数据
@@ -116,8 +116,8 @@ Encoder 接收来自采集层的原始音视频帧：
 |---|---|---|---|
 | 构造 | `Encoder(std::shared_ptr<IVideoFrameGetter>, std::shared_ptr<IAudioFrameGetter>, EncoderOptions)` | 创建编码器实例，此时不分配 FFmpeg 资源 | ✅ 是 |
 | 析构 | `~Encoder()` | 自动调用 `stop()` | ✅ 是 |
-| 启动 | `void start()` | 初始化编码器并启动编码线程，失败时抛 `std::runtime_error` | ❌ 不可并发 |
-| 停止 | `void stop()` | 优雅停止，join 线程并释放资源 | ❌ 不可并发 |
+| 启动 | `void start()` | 初始化编码器并启动编码线程，失败时抛 `std::runtime_error` | ⚠️ 不应并发调用 |
+| 停止 | `void stop()` | 优雅停止，join 线程并释放资源 | ⚠️ 不应并发调用 |
 | 注册消费者 | `consumer_id_t register_consumer()` | 返回唯一消费者 ID | ✅ 是（内部加锁） |
 | 注销消费者 | `void unregister_consumer(consumer_id_t)` | 清理该消费者未消费的数据 | ✅ 是（内部加锁） |
 | 等待数据 | `std::vector<std::shared_ptr<EncodedPacketBase>> wait_packet(consumer_id_t, uint64_t last_seq)` | 阻塞等待新包，返回该消费者未消费的包列表 | ✅ 是（内部加锁） |
@@ -128,9 +128,11 @@ Encoder 接收来自采集层的原始音视频帧：
 
 #### `EncodedPacketBase`
 
+完整结构定义和三模块对比见 [`多消费者技术方案.md` 4.1 节](./多消费者技术方案.md)。关键字段：
+
 ```cpp
 struct EncodedPacketBase {
-    uint64_t seq{0};              // 全局递增包序列号
+    uint64_t seq{0};              // 全局递增包序列号（由 Encoder 递增分配）
     std::vector<uint8_t> data;    // 压缩数据（H.264 NALU 或 AAC raw）
     int64_t pts{0};               // 显示时间戳（基于编码器 time_base）
     int64_t dts{0};               // 解码时间戳（基于编码器 time_base）
@@ -252,12 +254,7 @@ private:
 };
 ```
 
-### 6.2 消费者要点
-
-1. **维护 `last_seq`**：每次取到包后更新为最后一个包的 `seq`，下次 `wait_packet` 只返回增量数据。
-2. **`wait_packet` 是阻塞的**：没有新包时会阻塞，直到有新数据或 `Encoder::stop()` 被调用。
-3. **支持多个消费者并行**：MP4 录制和 RTMP 推流可以同时注册，各自独立消费。
-4. **消费端必须及时处理**：`packet_queue_` 有容量上限（默认 300），超限时最老的包会被丢弃。
+编码包队列容量默认 300（`EncoderOptions::packet_queue_capacity`），超限时丢弃最老包。消费者核心机制（`last_seq` 增量拉取、`wait_packet` 阻塞等待、多消费者并行）详见 [`多消费者技术方案.md`](./多消费者技术方案.md)。
 
 ---
 
@@ -311,7 +308,7 @@ graph TD
 
 ### 7.3 多消费者队列分发
 
-编码包进入 `packet_queue_`（`deque<QueuedPacket>`）后，每个活跃消费者独立通过 `wait_packet(consumer_id, last_seq)` 拉取增量数据。包在所有消费者取走后才释放，支持 MP4 录制和 RTMP 推流同时消费。
+编码包通过 `packet_queue_` 以多消费者模式分发，机制详见 [`多消费者技术方案.md`](./多消费者技术方案.md)。编码器的差异化配置：队列容器为 `deque<QueuedPacket>`，容量由 `EncoderOptions::packet_queue_capacity` 控制（默认 300）。
 
 ---
 
@@ -486,12 +483,16 @@ void audio_encode_loop() {
 
 ### 9.5 同步机制
 
-| 机制 | 作用 | 涉及变量 |
+编码器采用 `state_mtx_` + `state_cv_` 的同步模式，与多消费者方案 7.4/7.6 节一致。编码器的差异：
+
+| 维度 | 编码器 | 音视频采集模块 |
 |---|---|---|
-| `state_mtx_` | 保护所有共享状态 | `running_`、`packet_queue_`、`consumers_`、`video_meta_`、`audio_meta_` |
-| `state_cv_` | 条件变量，通知消费者 | 新包入队或停止时 `notify_all()` |
-| `packet_seq_` | 全局包序列号 | 入队时自增，消费者按 `last_seq` 拉取增量 |
-| `packet_queue_capacity` | 队列容量限制 | 超限时丢弃最老包，防止内存膨胀 |
+| 锁的数量 | 1 把（`state_mtx_`） | 2 把（`state_mtx_` + `start_mtx_`） |
+| 启动握手 | 无（不操作硬件，`start()` 同步初始化即可） | 有（需等待硬件初始化结果） |
+| 生产者线程 | 2 个（`video_thread_` + `audio_thread_`） | 1 个 |
+| 额外受保护状态 | `video_meta_`、`audio_meta_` | 无 |
+
+两个编码线程通过同一个 `enqueue_packet()` 入队，都在 `state_mtx_` 保护下操作 `packet_queue_`，不存在额外的线程安全问题。
 
 ### 9.6 关键设计决策
 
@@ -624,6 +625,6 @@ packet queue overflow, dropped oldest packet
 
 ### 12.4 线程安全注意事项
 
-- `start()` 和 `stop()` **不可并发调用**，也不可在编码线程内部调用。
+- `start()` 和 `stop()` **不应并发调用**，也不可在编码线程内部调用。
 - `register_consumer()` / `unregister_consumer()` / `wait_packet()` 可安全地在多个线程并发调用。
 - `Encoder` 实例应在所有消费者线程 join 后再销毁，避免 `wait_packet` 中的引用失效。

@@ -512,7 +512,7 @@ void Encoder::audio_encode_loop() {
 void Encoder::enqueue_packet(std::shared_ptr<EncodedPacketBase> packet) {
     std::lock_guard<std::mutex> lock(state_mtx_);
     packet->seq = ++packet_seq_;
-    packet_queue_.push_back({std::move(packet), consumers_});
+    packet_queue_.push_back({std::move(packet), active_consumers_});
 
     while (packet_queue_.size() > options_.packet_queue_capacity) {
         packet_queue_.pop_front();
@@ -524,7 +524,7 @@ void Encoder::enqueue_packet(std::shared_ptr<EncodedPacketBase> packet) {
 Encoder::consumer_id_t Encoder::register_consumer() {
     std::lock_guard<std::mutex> lock(state_mtx_);
     const consumer_id_t id = next_consumer_id_++;
-    consumers_.insert(id);
+    active_consumers_.insert(id);
     return id;
 }
 
@@ -545,7 +545,7 @@ void Encoder::cleanup_consumer_pending_locked(consumer_id_t consumer_id, uint64_
 
 void Encoder::unregister_consumer(consumer_id_t consumer_id) {
     std::lock_guard<std::mutex> lock(state_mtx_);
-    consumers_.erase(consumer_id);
+    active_consumers_.erase(consumer_id);
     cleanup_consumer_pending_locked(consumer_id, 0, true);
     state_cv_.notify_all();
 }
@@ -565,7 +565,7 @@ std::vector<std::shared_ptr<EncodedPacketBase>> Encoder::wait_packet(consumer_id
     });
 
     if ((!running_ && packet_queue_.empty()) ||
-        consumers_.count(consumer_id) == 0) {
+        active_consumers_.count(consumer_id) == 0) {
         return {};
     }
 

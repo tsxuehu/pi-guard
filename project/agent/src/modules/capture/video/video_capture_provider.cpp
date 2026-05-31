@@ -126,7 +126,7 @@ bool VideoCaptureProvider::init_v4l2_capture() {
 VideoCaptureProvider::consumer_id_t VideoCaptureProvider::register_consumer() {
     std::lock_guard lock(state_mtx_);
     const consumer_id_t id = next_consumer_id_++;
-    consumers_.insert(id);
+    active_consumers_.insert(id);
     logger->debug("registered consumer id=" + std::to_string(id));
     return id;
 }
@@ -155,7 +155,7 @@ void VideoCaptureProvider::cleanup_consumer_pending_locked(
 
 void VideoCaptureProvider::unregister_consumer(consumer_id_t consumer_id) {
     std::lock_guard lock(state_mtx_);
-    consumers_.erase(consumer_id);
+    active_consumers_.erase(consumer_id);
     cleanup_consumer_pending_locked(consumer_id, 0, true);
     state_cv_.notify_all();
     logger->debug("unregistered consumer id=" + std::to_string(consumer_id));
@@ -379,7 +379,7 @@ void VideoCaptureProvider::produce_loop() {
             std::lock_guard lock(state_mtx_); // C++17 CTAD
             QueuedFrame item;
             item.frame = std::move(frame);
-            item.pending_consumers = consumers_;
+            item.pending_consumers = active_consumers_;
             queue_.push_back(std::move(item));
 
             // 满容量时直接丢最老帧。
@@ -432,7 +432,7 @@ std::vector<std::shared_ptr<VideoFrame>> VideoCaptureProvider::wait_frame(
         return false;
     });
 
-    if (!running_ || queue_.empty() || consumers_.count(consumer_id) == 0) {
+    if (!running_ || queue_.empty() || active_consumers_.count(consumer_id) == 0) {
         return {};
     }
 
