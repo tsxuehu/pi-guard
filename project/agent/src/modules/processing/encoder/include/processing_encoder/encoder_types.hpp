@@ -13,12 +13,16 @@ namespace piguard::processing_encoder {
 class IVideoFrameGetter {
 public:
     virtual ~IVideoFrameGetter() = default;
+    virtual void register_consumer() = 0;
+    virtual void unregister_consumer() = 0;
     virtual std::vector<std::shared_ptr<piguard::capture_video::VideoFrame>> fetch_frames() = 0;
 };
 
 class IAudioFrameGetter {
 public:
     virtual ~IAudioFrameGetter() = default;
+    virtual void register_consumer() = 0;
+    virtual void unregister_consumer() = 0;
     virtual std::vector<std::shared_ptr<piguard::capture_audio::AudioFrame>> fetch_frames() = 0;
 };
 

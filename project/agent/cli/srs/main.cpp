@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     // 创建适配器
     auto video_adapter = std::make_shared<piguard::processing_encoder::VideoProviderAdapter>(*video_provider);
     auto audio_adapter = std::make_shared<piguard::processing_encoder::AudioProviderAdapter>(*audio_provider);
-    
+
     // 配置编码器选项
     piguard::processing_encoder::EncoderOptions encoder_options;
     encoder_options.video_width = config.video_width;

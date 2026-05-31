@@ -5,10 +5,17 @@
 namespace piguard::processing_encoder {
 
 VideoProviderAdapter::VideoProviderAdapter(capture_video::VideoCaptureProvider& provider)
-    : provider_(provider), consumer_id_(provider_.register_consumer()) {}
+    : provider_(provider) {}
 
-VideoProviderAdapter::~VideoProviderAdapter() {
-    provider_.unregister_consumer(consumer_id_);
+void VideoProviderAdapter::register_consumer() {
+    consumer_id_ = provider_.register_consumer();
+}
+
+void VideoProviderAdapter::unregister_consumer() {
+    if (consumer_id_ != 0) {
+        provider_.unregister_consumer(consumer_id_);
+        consumer_id_ = 0;
+    }
 }
 
 std::vector<std::shared_ptr<capture_video::VideoFrame>> VideoProviderAdapter::fetch_frames() {

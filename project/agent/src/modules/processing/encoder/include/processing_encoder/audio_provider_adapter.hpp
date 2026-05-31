@@ -12,11 +12,13 @@ namespace piguard::processing_encoder {
 class AudioProviderAdapter : public IAudioFrameGetter {
 public:
     explicit AudioProviderAdapter(piguard::capture_audio::AudioCaptureProvider& provider);
-    ~AudioProviderAdapter() override;
+    ~AudioProviderAdapter() = default;
 
     AudioProviderAdapter(const AudioProviderAdapter&) = delete;
     AudioProviderAdapter& operator=(const AudioProviderAdapter&) = delete;
 
+    void register_consumer() override;
+    void unregister_consumer() override;
     std::vector<std::shared_ptr<piguard::capture_audio::AudioFrame>> fetch_frames() override;
 
 private:

@@ -5,10 +5,17 @@
 namespace piguard::processing_encoder {
 
 AudioProviderAdapter::AudioProviderAdapter(capture_audio::AudioCaptureProvider& provider)
-    : provider_(provider), consumer_id_(provider_.register_consumer()) {}
+    : provider_(provider) {}
 
-AudioProviderAdapter::~AudioProviderAdapter() {
-    provider_.unregister_consumer(consumer_id_);
+void AudioProviderAdapter::register_consumer() {
+    consumer_id_ = provider_.register_consumer();
+}
+
+void AudioProviderAdapter::unregister_consumer() {
+    if (consumer_id_ != 0) {
+        provider_.unregister_consumer(consumer_id_);
+        consumer_id_ = 0;
+    }
 }
 
 std::vector<std::shared_ptr<capture_audio::AudioFrame>> AudioProviderAdapter::fetch_frames() {

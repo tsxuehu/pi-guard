@@ -12,11 +12,13 @@ namespace piguard::processing_encoder {
 class VideoProviderAdapter : public IVideoFrameGetter {
 public:
     explicit VideoProviderAdapter(piguard::capture_video::VideoCaptureProvider& provider);
-    ~VideoProviderAdapter() override;
+    ~VideoProviderAdapter() = default;
 
     VideoProviderAdapter(const VideoProviderAdapter&) = delete;
     VideoProviderAdapter& operator=(const VideoProviderAdapter&) = delete;
 
+    void register_consumer() override;
+    void unregister_consumer() override;
     std::vector<std::shared_ptr<piguard::capture_video::VideoFrame>> fetch_frames() override;
 
 private:

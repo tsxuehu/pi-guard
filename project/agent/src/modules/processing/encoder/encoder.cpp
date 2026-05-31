@@ -274,11 +274,24 @@ void Encoder::start() {
         running_ = true;
     }
 
+    if (video_getter_) {
+        video_getter_->register_consumer();
+    }
+    if (audio_getter_) {
+        audio_getter_->register_consumer();
+    }
+
     audio_pcm_buf_.clear();
     audio_pts_base_initialized_ = false;
     if (!init_video_encoder() || !init_audio_encoder()) {
         logger->error("encoder init failed");
         mark_stopped();
+        if (audio_getter_) {
+            audio_getter_->unregister_consumer();
+        }
+        if (video_getter_) {
+            video_getter_->unregister_consumer();
+        }
         close_video_encoder();
         close_audio_encoder();
         throw std::runtime_error("Encoder: failed to initialize encoders");
@@ -345,6 +358,14 @@ void Encoder::stop() {
     flush_audio_encoder();
     close_video_encoder();
     close_audio_encoder();
+
+    if (audio_getter_) {
+        audio_getter_->unregister_consumer();
+    }
+    if (video_getter_) {
+        video_getter_->unregister_consumer();
+    }
+
     logger->info("encoder stopped");
 }
 
