@@ -240,7 +240,7 @@ void AudioCaptureProvider::produce_loop() {
         auto af = std::make_shared<AudioFrame>();
         af->seq = next_seq_++;
         af->pcm_data.assign(buffer.begin(), buffer.begin() + pcm_period_frames * channels_);
-        af->timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        af->timestamp_ns = std::chrono::steady_clock::now().time_since_epoch().count();
 
         bool dropped_after_stop = false;
         {

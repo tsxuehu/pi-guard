@@ -438,7 +438,7 @@ void Encoder::audio_encode_loop() {
                 continue;
             }
             if (audio_pcm_buf_.empty()) {
-                audio_pcm_front_epoch_ns_ = frame->timestamp;
+                audio_pcm_front_epoch_ns_ = frame->timestamp_ns;
             }
             audio_pcm_buf_.insert(audio_pcm_buf_.end(),
                                   frame->pcm_data.begin(),
