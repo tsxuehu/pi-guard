@@ -2,6 +2,8 @@
 
 <cite>
 **本文引用的文件**
+- [rtmp_publisher_module.hpp](file://project/agent/src/modules/external_access/rtmp_pusher/include/rtmp_pusher/rtmp_publisher_module.hpp)
+- [rtmp_publisher_module.cpp](file://project/agent/src/modules/external_access/rtmp_pusher/rtmp_publisher_module.cpp)
 - [srs_rtmp_pusher.hpp](file://project/agent/cli/srs/srs_rtmp_pusher.hpp)
 - [srs_rtmp_pusher.cpp](file://project/agent/cli/srs/srs_rtmp_pusher.cpp)
 - [main.cpp](file://project/agent/cli/srs/main.cpp)
@@ -17,6 +19,13 @@
 - [run-srs.sh](file://project/srs/scripts/run-srs.sh)
 </cite>
 
+## 更新摘要
+**所做更改**
+- 更新了模块目录重命名为 'rtmp_pusher' 后的相关引用和路径说明
+- 新增了 RTMPPusherModule 类的详细分析，作为外部访问模块的一部分
+- 更新了项目结构图和依赖关系图，反映新的模块组织方式
+- 完善了 RTMP 推流工具的架构说明，包括模块化设计和组件交互
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -30,10 +39,10 @@
 10. [附录](#附录)
 
 ## 简介
-本文件面向 RTMP 推流工具的技术文档，重点解释如何将音视频数据通过 SRS RTMP 服务器进行实时分发。文档围绕 SrsRtmpPusher 的实现原理展开，涵盖 RTMP 协议处理、网络连接管理、流媒体数据传输、配置方法、使用示例、网络优化建议、断线重连机制、推流质量监控与故障排除。
+本文件面向 RTMP 推流工具的技术文档，重点解释如何将音视频数据通过 SRS RTMP 服务器进行实时分发。文档围绕 SrsRtmpPusher 和 RTMPPusherModule 的实现原理展开，涵盖 RTMP 协议处理、网络连接管理、流媒体数据传输、配置方法、使用示例、网络优化建议、断线重连机制、推流质量监控与故障排除。
 
 ## 项目结构
-该工具位于 agent 子项目的 CLI 示例中，采用模块化设计，结合采集、编码、推流三个阶段完成从本地设备到 SRS 的完整链路。
+该工具位于 agent 子项目的 CLI 示例中，采用模块化设计，结合采集、编码、推流三个阶段完成从本地设备到 SRS 的完整链路。模块目录已重命名为 'rtmp_pusher'，体现了更好的代码组织和功能分离。
 
 ```mermaid
 graph TB
@@ -41,25 +50,29 @@ subgraph "CLI 示例"
 M["main.cpp<br/>命令行入口"]
 CFG["srs_config.hpp<br/>默认配置"]
 PUSH["srs_rtmp_pusher.hpp/.cpp<br/>SrsRtmpPusher"]
-end
+END
+subgraph "外部访问模块"
+RTMP["rtmp_publisher_module.hpp/.cpp<br/>RTMPPusherModule"]
+END
 subgraph "编码模块"
 ENC["encoder.hpp<br/>Encoder"]
 ET["encoder_types.hpp<br/>编码类型/元数据"]
-end
+END
 subgraph "基础设施"
 LOG["logger.hpp<br/>日志接口"]
 SHD["shutdown_manager.hpp<br/>关机管理"]
 MOD["module.hpp<br/>模块基类"]
-end
+END
 subgraph "SRS 服务"
 SRS["srs.conf<br/>服务配置"]
 RUN["run-srs.sh<br/>启动脚本"]
-end
+END
 M --> ENC
 M --> PUSH
 M --> CFG
 M --> SHD
 PUSH --> LOG
+RTMP --> MOD
 ENC --> ET
 M --> LOG
 PUSH --> SRS
@@ -70,6 +83,8 @@ RUN --> SRS
 - [main.cpp:24-131](file://project/agent/cli/srs/main.cpp#L24-L131)
 - [srs_rtmp_pusher.hpp:17-46](file://project/agent/cli/srs/srs_rtmp_pusher.hpp#L17-L46)
 - [srs_rtmp_pusher.cpp:10-104](file://project/agent/cli/srs/srs_rtmp_pusher.cpp#L10-L104)
+- [rtmp_publisher_module.hpp:10-19](file://project/agent/src/modules/external_access/rtmp_pusher/include/rtmp_pusher/rtmp_publisher_module.hpp#L10-L19)
+- [rtmp_publisher_module.cpp:3-21](file://project/agent/src/modules/external_access/rtmp_pusher/rtmp_publisher_module.cpp#L3-L21)
 - [encoder.hpp:16-90](file://project/agent/src/modules/processing/encoder/include/processing_encoder/encoder.hpp#L16-L90)
 - [encoder_types.hpp:13-75](file://project/agent/src/modules/processing/encoder/include/processing_encoder/encoder_types.hpp#L13-L75)
 - [srs_config.hpp:5-17](file://project/agent/cli/srs/srs_config.hpp#L5-L17)
@@ -82,6 +97,8 @@ RUN --> SRS
 - [main.cpp:24-131](file://project/agent/cli/srs/main.cpp#L24-L131)
 - [srs_rtmp_pusher.hpp:17-46](file://project/agent/cli/srs/srs_rtmp_pusher.hpp#L17-L46)
 - [srs_rtmp_pusher.cpp:10-104](file://project/agent/cli/srs/srs_rtmp_pusher.cpp#L10-L104)
+- [rtmp_publisher_module.hpp:10-19](file://project/agent/src/modules/external_access/rtmp_pusher/include/rtmp_pusher/rtmp_publisher_module.hpp#L10-L19)
+- [rtmp_publisher_module.cpp:3-21](file://project/agent/src/modules/external_access/rtmp_pusher/rtmp_publisher_module.cpp#L3-L21)
 - [encoder.hpp:16-90](file://project/agent/src/modules/processing/encoder/include/processing_encoder/encoder.hpp#L16-L90)
 - [encoder_types.hpp:13-75](file://project/agent/src/modules/processing/encoder/include/processing_encoder/encoder_types.hpp#L13-L75)
 - [srs_config.hpp:5-17](file://project/agent/cli/srs/srs_config.hpp#L5-L17)
@@ -92,6 +109,7 @@ RUN --> SRS
 
 ## 核心组件
 - SrsRtmpPusher：负责 RTMP 推流生命周期管理、FFmpeg/AVFORMAT 初始化、流参数配置、音视频包写入与时间戳处理。
+- RTMPPusherModule：作为外部访问模块的 RTMP 推流实现，继承自基础 Module 类，提供模块化的推流功能。
 - Encoder：负责音视频采集、编码、元数据产出与多消费者分发。
 - CLI 入口：负责设备参数解析、组件编排、信号处理与优雅停机。
 - 日志与关机管理：统一的日志接口与信号处理，确保稳定退出。
@@ -99,20 +117,23 @@ RUN --> SRS
 
 **章节来源**
 - [srs_rtmp_pusher.hpp:17-46](file://project/agent/cli/srs/srs_rtmp_pusher.hpp#L17-L46)
-- [srs_rtmp_pusher.cpp:10-104](file://project/agent/cli/srs/srs_rtmp_pusher.cpp#L10-L104)
+- [srs_rtmp_pusher.cpp:10-193](file://project/agent/cli/srs/srs_rtmp_pusher.cpp#L10-L193)
+- [rtmp_publisher_module.hpp:10-19](file://project/agent/src/modules/external_access/rtmp_pusher/include/rtmp_pusher/rtmp_publisher_module.hpp#L10-L19)
+- [rtmp_publisher_module.cpp:3-21](file://project/agent/src/modules/external_access/rtmp_pusher/rtmp_publisher_module.cpp#L3-L21)
 - [encoder.hpp:16-90](file://project/agent/src/modules/processing/encoder/include/processing_encoder/encoder.hpp#L16-L90)
 - [main.cpp:24-131](file://project/agent/cli/srs/main.cpp#L24-L131)
 - [logger.hpp:7-22](file://project/agent/src/modules/infra/log/include/infra_log/logger.hpp#L7-L22)
 - [shutdown_manager.hpp:5-9](file://project/agent/src/foundation/include/foundation/shutdown_manager.hpp#L5-L9)
 
 ## 架构总览
-下图展示了从采集到推流的关键交互流程，以及与 SRS 的对接方式。
+下图展示了从采集到推流的关键交互流程，以及与 SRS 的对接方式。新的模块化架构将推流功能封装为独立的 RTMPPusherModule。
 
 ```mermaid
 sequenceDiagram
 participant CLI as "CLI 入口(main.cpp)"
 participant ENC as "Encoder"
 participant PUSH as "SrsRtmpPusher"
+participant RTMP as "RTMPPusherModule"
 participant SRS as "SRS 服务器"
 CLI->>ENC : "启动采集与编码"
 CLI->>PUSH : "创建并启动推流器"
@@ -124,12 +145,14 @@ PUSH->>SRS : "av_interleaved_write_frame(FLV/RTMP)"
 end
 CLI->>PUSH : "stop()"
 PUSH->>SRS : "写入尾部/关闭连接/释放上下文"
+Note over RTMP : "模块化推流实现"
 ```
 
 **图表来源**
 - [main.cpp:42-131](file://project/agent/cli/srs/main.cpp#L42-L131)
 - [srs_rtmp_pusher.cpp:24-104](file://project/agent/cli/srs/srs_rtmp_pusher.cpp#L24-L104)
 - [encoder.hpp:32-36](file://project/agent/src/modules/processing/encoder/include/processing_encoder/encoder.hpp#L32-L36)
+- [rtmp_publisher_module.cpp:7-18](file://project/agent/src/modules/external_access/rtmp_pusher/rtmp_publisher_module.cpp#L7-L18)
 
 ## 详细组件分析
 
@@ -168,6 +191,39 @@ class SrsRtmpPusher {
 **章节来源**
 - [srs_rtmp_pusher.hpp:17-46](file://project/agent/cli/srs/srs_rtmp_pusher.hpp#L17-L46)
 - [srs_rtmp_pusher.cpp:10-193](file://project/agent/cli/srs/srs_rtmp_pusher.cpp#L10-L193)
+
+### RTMPPusherModule 模块化设计
+RTMPPusherModule 作为外部访问模块的一部分，提供了模块化的 RTMP 推流功能：
+- 继承自基础 Module 类，遵循统一的模块接口规范
+- 提供模块名称标识、启动/停止控制和单次推送接口
+- 使用原子布尔变量管理运行状态，支持线程安全的操作
+- 作为独立模块可与其他外部访问功能（HTTP、WebSocket）协同工作
+
+```mermaid
+classDiagram
+class RTMPPusherModule {
++name() string
++start() bool
++stop() void
++push_once() void
+-private running_ atomic<bool>
+}
+class Module {
+<<abstract>>
++name() string
++start() bool
++stop() void
+}
+RTMPPusherModule --|> Module
+```
+
+**图表来源**
+- [rtmp_publisher_module.hpp:10-19](file://project/agent/src/modules/external_access/rtmp_pusher/include/rtmp_pusher/rtmp_publisher_module.hpp#L10-L19)
+- [module.hpp:7-14](file://project/agent/src/foundation/include/foundation/module.hpp#L7-L14)
+
+**章节来源**
+- [rtmp_publisher_module.hpp:10-19](file://project/agent/src/modules/external_access/rtmp_pusher/include/rtmp_pusher/rtmp_publisher_module.hpp#L10-L19)
+- [rtmp_publisher_module.cpp:3-21](file://project/agent/src/modules/external_access/rtmp_pusher/rtmp_publisher_module.cpp#L3-L21)
 
 ### RTMP 协议处理与时间戳策略
 - 时间基映射：将编码器提供的 time_base 映射到对应 AVStream 的 time_base，保证 PTS/DTS 与流时间基一致。
@@ -253,7 +309,7 @@ P->>F : "avformat_network_deinit()"
 - [srs_rtmp_pusher.cpp:183-190](file://project/agent/cli/srs/srs_rtmp_pusher.cpp#L183-L190)
 
 ## 依赖分析
-- 组件耦合：CLI 入口依赖 Encoder 与 SrsRtmpPusher；SrsRtmpPusher 依赖日志接口与 FFmpeg 库；Encoder 依赖采集提供者与编码类型定义。
+- 组件耦合：CLI 入口依赖 Encoder 与 SrsRtmpPusher；SrsRtmpPusher 依赖日志接口与 FFmpeg 库；RTMPPusherModule 依赖基础 Module 接口；Encoder 依赖采集提供者与编码类型定义。
 - 外部依赖：FFmpeg（libavformat/libavcodec/libavutil）、SRS 服务端。
 - 潜在循环依赖：当前文件组织清晰，未发现直接循环依赖。
 
@@ -264,6 +320,7 @@ CLI --> PUSH["srs_rtmp_pusher.hpp/.cpp"]
 CLI --> CFG["srs_config.hpp"]
 CLI --> SHD["shutdown_manager.hpp"]
 PUSH --> LOG["logger.hpp"]
+RTMP --> MOD["module.hpp"]
 ENC --> ET["encoder_types.hpp"]
 PUSH --> SRS["SRS 服务(srs.conf)"]
 ```
@@ -271,6 +328,7 @@ PUSH --> SRS["SRS 服务(srs.conf)"]
 **图表来源**
 - [main.cpp:1-131](file://project/agent/cli/srs/main.cpp#L1-L131)
 - [srs_rtmp_pusher.hpp:1-13](file://project/agent/cli/srs/srs_rtmp_pusher.hpp#L1-L13)
+- [rtmp_publisher_module.hpp:1-13](file://project/agent/src/modules/external_access/rtmp_pusher/include/rtmp_pusher/rtmp_publisher_module.hpp#L1-L13)
 - [encoder.hpp:1-90](file://project/agent/src/modules/processing/encoder/include/processing_encoder/encoder.hpp#L1-L90)
 - [encoder_types.hpp:1-75](file://project/agent/src/modules/processing/encoder/include/processing_encoder/encoder_types.hpp#L1-L75)
 - [srs_config.hpp:1-19](file://project/agent/cli/srs/srs_config.hpp#L1-L19)
@@ -280,6 +338,7 @@ PUSH --> SRS["SRS 服务(srs.conf)"]
 **章节来源**
 - [main.cpp:1-131](file://project/agent/cli/srs/main.cpp#L1-L131)
 - [srs_rtmp_pusher.hpp:1-13](file://project/agent/cli/srs/srs_rtmp_pusher.hpp#L1-L13)
+- [rtmp_publisher_module.hpp:1-13](file://project/agent/src/modules/external_access/rtmp_pusher/include/rtmp_pusher/rtmp_publisher_module.hpp#L1-L13)
 - [encoder.hpp:1-90](file://project/agent/src/modules/processing/encoder/include/processing_encoder/encoder.hpp#L1-L90)
 - [encoder_types.hpp:1-75](file://project/agent/src/modules/processing/encoder/include/processing_encoder/encoder_types.hpp#L1-L75)
 - [logger.hpp:1-25](file://project/agent/src/modules/infra/log/include/infra_log/logger.hpp#L1-L25)
@@ -291,10 +350,8 @@ PUSH --> SRS["SRS 服务(srs.conf)"]
 - 网络拥塞控制：在高带宽场景下适当降低帧率/分辨率或启用硬件编码，减少丢包与重传。
 - 日志级别：生产环境建议降低日志级别，避免频繁 I/O 影响吞吐。
 
-[本节为通用性能建议，无需特定文件引用]
-
 ## 故障排除指南
-- H.264 打包格式不匹配（Annex B vs AVCC）：SRS 在 HLS 转封装时可能误判，需在服务端关闭“优先尝试 Annex B”，或确保推流端使用正确的 AVCC 打包。
+- H.264 打包格式不匹配（Annex B vs AVCC）：SRS 在 HLS 转封装时可能误判，需在服务端关闭"优先尝试 Annex B"，或确保推流端使用正确的 AVCC 打包。
 - 无效 PTS（AV_NOPTS_VALUE）：推流端会进行单调补齐，但频繁出现提示编码器未正确设置时间戳，应检查编码器时间戳生成逻辑。
 - 声画不同步：确认视频/音频基于同一采集时刻对齐，避免仅使用帧序号或采样点计数不一致。
 - Broken pipe：SRS 在发布失败后会断开 RTMP，客户端继续写入会报错，需在上层实现重连与错误恢复。
@@ -304,14 +361,12 @@ PUSH --> SRS["SRS 服务(srs.conf)"]
 - [srs_rtmp_pusher.cpp:146-173](file://project/agent/cli/srs/srs_rtmp_pusher.cpp#L146-L173)
 
 ## 结论
-SrsRtmpPusher 通过 FFmpeg 完成 RTMP 推流的底层协议处理，具备完善的生命周期管理与时间戳处理能力。结合编码器与 CLI 入口，可快速搭建从本地采集到 SRS 的稳定推流链路。针对生产环境，建议补充断线重连、动态参数调节与更细粒度的质量监控，以进一步提升稳定性与用户体验。
-
-[本节为总结性内容，无需特定文件引用]
+SrsRtmpPusher 通过 FFmpeg 完成 RTMP 推流的底层协议处理，具备完善的生命周期管理与时间戳处理能力。RTMPPusherModule 作为模块化设计的体现，提供了标准化的推流接口。结合编码器与 CLI 入口，可快速搭建从本地采集到 SRS 的稳定推流链路。针对生产环境，建议补充断线重连、动态参数调节与更细粒度的质量监控，以进一步提升稳定性与用户体验。
 
 ## 附录
 
 ### 数据流概览
-以下图示展示了主要数据路径，其中 RTMP 推流位于“实时监控”与“双向语音对讲”的上行链路中。
+以下图示展示了主要数据路径，其中 RTMP 推流位于"实时监控"与"双向语音对讲"的上行链路中。
 
 ```mermaid
 graph TB

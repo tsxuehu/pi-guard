@@ -1,1 +1,2 @@
-CompileCommands: build/agent/compile_commands.json
+CompileFlags:
+  CompilationDatabase: build/agent
