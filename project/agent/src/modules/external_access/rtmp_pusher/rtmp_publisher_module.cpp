@@ -1,4 +1,4 @@
-#include "access_pusher/rtmp_publisher_module.hpp"
+#include "rtmp_pusher/rtmp_publisher_module.hpp"
 
 namespace piguard::external_access {
 

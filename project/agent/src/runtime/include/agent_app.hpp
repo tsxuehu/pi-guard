@@ -11,7 +11,7 @@
 #include "foundation/thread_safe_queue.hpp"
 #include "foundation/types.hpp"
 #include "access_http/http_notify.hpp"
-#include "access_pusher/rtmp_publisher_module.hpp"
+#include "rtmp_pusher/rtmp_publisher_module.hpp"
 #include "access_websocket/websocket_client.hpp"
 #include "infra_config/config_manager.hpp"
 #include "infra_event/event_bus.hpp"
