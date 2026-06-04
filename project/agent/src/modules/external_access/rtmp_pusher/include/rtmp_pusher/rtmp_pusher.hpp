@@ -4,6 +4,7 @@
 #include "processing_encoder/encoder_types.hpp"
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -28,6 +29,9 @@ public:
     void stop();
 
 private:
+    void manage_loop();
+    bool try_connect();
+    void cleanup_connection();
     void run_loop();
     void write_packet(const std::shared_ptr<processing_encoder::EncodedPacketBase>& packet);
 
@@ -40,13 +44,18 @@ private:
     processing_encoder::EncodedVideoStreamMeta video_meta_;
     processing_encoder::EncodedAudioStreamMeta audio_meta_;
 
+    /// started_: 管理线程已启动，由 start()/stop() 控制
+    std::atomic<bool> started_{false};
+    /// running_: 推流循环运行中，由管理线程内部控制
     std::atomic<bool> running_{false};
-    std::mutex writer_mutex_;
+    std::mutex state_mtx_;
+    std::condition_variable state_cv_;
     std::thread worker_thread_;
 
     uint64_t last_seq_{0};
     int64_t next_video_pts_{0};
     int64_t next_audio_pts_{0};
+    int consecutive_errors_{0};
 };
 
 } // namespace piguard::external_access
