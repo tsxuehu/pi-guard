@@ -35,36 +35,6 @@ public:
     void stop();
     void run_for_demo();
 
-private:
-    void start_threads();
-    void stop_threads();
-
-    std::atomic<bool> running_{false};
-    std::vector<std::thread> workers_;
-
-    foundation::ThreadSafeQueue<foundation::VideoFrame> video_queue_;
-    foundation::ThreadSafeQueue<foundation::AudioFrame> audio_queue_;
-    foundation::ThreadSafeQueue<foundation::Event> event_queue_;
-
-    infra::ConfigManager config_manager_;
-    infra_log::LogModule log_module_;
-    std::shared_ptr<infra_log::Logger> logger_;
-    infra::PerfMonitor perf_monitor_;
-    infra::EventBus event_bus_;
-
-    capture_video::VideoCaptureModule video_capture_;
-    capture_audio::AudioCapture audio_capture_;
-
-    processing::MotionDetect motion_detect_;
-    processing_encoder::Encoder encoder_;
-    processing::EchoCanceller echo_canceller_;
-
-    output::FileWriter file_writer_;
-    output::AudioPlayback audio_playback_;
-
-    external_access::RTMPPusherModule rtmp_pusher_;
-    external_access::HTTPNotify http_notify_;
-    external_access::WebSocketClient ws_client_;
 };
 
 }  // namespace piguard::app
